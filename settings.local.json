@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "Bash(pnpm *)",
+      "Bash(mkdir *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(prettier *)",
+      "Bash(eslint *)",
+      "Bash(chmod +x /Users/zhanghailong/Desktop/coding/turbo-vertical-space/.claude/skills/analyze/scripts/generate-madge.mjs)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ]
+  }
+}
