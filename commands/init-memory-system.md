@@ -41,7 +41,7 @@ description: 一次性为当前项目部署项目记忆维护体系：生成子 
 
 写入 `.cursor/agents/project-memory-maintainer.md`，内容：
 
-```markdown
+````markdown
 ---
 name: project-memory-maintainer
 model: inherit
@@ -108,10 +108,20 @@ is_background: true
 10. 每次只更新受影响模块，不重写整个记忆层。
 11. 记忆内容应帮助 Agent 判断代码应该放哪里、该复用什么、哪些风格和边界不能破坏。
 
+## 维护完成后
+
+无论本轮是真维护了，还是判断 no-op，结束前都要执行一次：
+
+```bash
+node .cursor/hooks/memory-precheck.mjs --mark-done
+```
+
+这会把当前工作区作为新基线落盘，下次 hook 仅检查"自基线以来的新增量"，避免反复对同一批未提交的变更重复触发提示。
+
 ## 输出目标
 
 让未来的 AI Agent 和开发者能快速理解当前项目的业务模块、模块边界、关键流程、工程风格、复用入口和风险点。
-```
+````
 
 ## 产物 2：Hook 预检脚本
 
@@ -122,16 +132,24 @@ is_background: true
 /**
  * 项目记忆维护预检 Hook
  *
- * 由 Cursor hooks 在 stop / sessionEnd 时调用：
- *   1. 判断本轮 Agent 工作是否产生足够大的代码或架构相关变更
- *   2. 通过 .memory/.hook-state.json 指纹去重，避免 stop 与 sessionEnd 对同一批变更重复触发
- *   3. 命中阈值时输出 followup_message，提示主 Agent 调用 project-memory-maintainer 子代理
+ * 由 Cursor hooks 在 stop / sessionEnd 时调用，判断是否要提示主 Agent
+ * 调用 project-memory-maintainer 子代理维护 .memory/。
  *
- * 本脚本不直接调子代理；是否真正维护记忆，由主 Agent 与子代理自身判断。
+ * 解决的核心问题：
+ *   旧实现以"工作区相对 HEAD 的全量差异"为输入。
+ *   长期不 commit 时差异只增不减，每次 stop 都过阈值反复触发同一批变更。
+ *
+ * 改进策略：
+ *   1. 基线机制 —— 以"上次成功维护后的工作区快照"为基线，仅看相对基线的增量。
+ *      指纹由 path:size:mtime 构成，不依赖 HEAD，适配长期不 commit 的工作流。
+ *   2. 三层节流 —— 同指纹去重 + 冷却时间（默认 30 分钟）+ 增量阈值。
+ *   3. 子代理协作 —— 维护成功后调用 `--mark-done` 刷新基线，下次仅看新增量。
+ *   4. 手动控制 —— `--force` 强制提示一次，`--reset` 清空状态，`--status` 查看状态。
+ *   5. 可选 commit-only 模式 —— `requireHeadAdvance=true` 时只在 HEAD 前进后才计入。
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
@@ -152,7 +170,7 @@ const INCLUDE_PATTERNS = [
 
 /** 即使命中 include 也强制排除 */
 const EXCLUDE_PATTERNS = [
-    /^\.memory\//, /^\.cursor\//, /^\.omc\//, /^\.omx\//, /^\.claude\//,
+    /^\.memory\//, /^\.cursor\//, /^\.omc\//, /^\.omx\//, /^\.claude\//, /^AIConfig\//,
     /^docs\//, /^README/i, /(^|\/)CHANGELOG/i,
     /^\.next\//, /^dist\//, /^build\//, /^out\//, /^coverage\//,
     /^node_modules\//, /^logs\//,
@@ -176,8 +194,17 @@ const ARCHITECTURE_PATTERNS = [
     /^src\/components\/common\//,
 ]
 
-/** 触发阈值，按项目调整 */
-const THRESHOLDS = { files: 3, lines: 80 }
+/** 触发阈值与节流配置，按项目实际节奏调整 */
+const CONFIG = {
+    /** 自上次维护以来变更文件数 ≥ 此值才触发 */
+    deltaFileThreshold: 5,
+    /** 自上次维护以来变更行数 ≥ 此值才触发（按 deltaFiles 相对 HEAD 计） */
+    deltaLineThreshold: 200,
+    /** 距离上次提示的冷却时间（分钟）；冷却内即使有新增量也不重复提示 */
+    cooldownMinutes: 30,
+    /** 是否要求 HEAD 前进（commit 之后）才计入触发分数；默认关闭 */
+    requireHeadAdvance: false,
+}
 
 const STATE_FILE = '.memory/.hook-state.json'
 const LIST_LIMIT = 12
@@ -196,6 +223,9 @@ function runGit(args) {
 
 const inGitRepo = () => runGit(['rev-parse', '--is-inside-work-tree']) === 'true'
 const normalizePath = (p) => p.replace(/\\/g, '/')
+const isRelevant = (p) =>
+    !EXCLUDE_PATTERNS.some((re) => re.test(p)) &&
+    INCLUDE_PATTERNS.some((re) => re.test(p))
 
 /** 解析 git status --porcelain 输出，兼容 rename（` -> `） */
 function parseStatusPaths(status) {
@@ -210,18 +240,62 @@ function parseStatusPaths(status) {
         .map(normalizePath)
 }
 
-/** 同时统计已暂存与未暂存差异，覆盖 Agent 改了但还没提交的常见情况 */
-function countChangedLines(paths) {
+/**
+ * 计算工作区中相关文件的指纹。
+ * 用 path:size:mtime 而非 git diff，原因：未提交时 diff 一直在变，
+ * 但只要文件 size 与 mtime 不变就不应判定为"又有新变更"。
+ */
+function computeWorktreeFingerprint(paths) {
+    const items = []
+    for (const p of paths) {
+        try {
+            const st = statSync(p)
+            items.push(`${p}|${st.size}|${Math.floor(st.mtimeMs)}`)
+        } catch {
+            items.push(`${p}|missing`)
+        }
+    }
+    items.sort()
+    return {
+        files: items,
+        hash: createHash('sha1').update(items.join('\n')).digest('hex').slice(0, 16),
+    }
+}
+
+/** 找出当前工作区中相对基线"新增或元数据变化"的文件路径 */
+function computeDelta(baselineFiles, currentFiles) {
+    const baselineMap = new Map()
+    for (const item of baselineFiles || []) {
+        const idx = item.indexOf('|')
+        if (idx === -1) continue
+        baselineMap.set(item.slice(0, idx), item.slice(idx + 1))
+    }
+    const newOrChanged = []
+    for (const item of currentFiles) {
+        const idx = item.indexOf('|')
+        if (idx === -1) continue
+        const path = item.slice(0, idx)
+        const meta = item.slice(idx + 1)
+        const baselineMeta = baselineMap.get(path)
+        if (baselineMeta === undefined || baselineMeta !== meta) {
+            newOrChanged.push(path)
+        }
+    }
+    return newOrChanged
+}
+
+/** 仅作为辅助信号：deltaFiles 相对 HEAD 的总变更行数 */
+function countLinesAgainstHead(paths) {
     if (paths.length === 0) return 0
     const numstat = runGit(['diff', '--numstat', 'HEAD', '--', ...paths])
     if (!numstat) return 0
     return numstat.split('\n').reduce((total, line) => {
-        const [added, deleted] = line.split(/\s+/)
+        const [a, d] = line.split(/\s+/)
         const safe = (s) => {
             const n = Number.parseInt(s, 10)
             return Number.isFinite(n) ? n : 0
         }
-        return total + safe(added) + safe(deleted)
+        return total + safe(a) + safe(d)
     }, 0)
 }
 
@@ -239,51 +313,23 @@ function writeState(file, state) {
     }
 }
 
-/** 用 HEAD + 文件列表 + 短统计构造稳定指纹，避免 stop 与 sessionEnd 重复触发同一批变更 */
-function diffSignature(paths) {
-    const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
-    const shortstat = runGit(['diff', '--shortstat', 'HEAD', '--', ...paths])
-    return createHash('sha1').update([head, ...paths, shortstat].join('\n')).digest('hex').slice(0, 16)
+const minutesSince = (iso) => {
+    if (!iso) return Infinity
+    return (Date.now() - new Date(iso).getTime()) / 60000
 }
 
-function main() {
-    if (!inGitRepo()) return
+function emitFollowup(message) {
+    process.stdout.write(JSON.stringify({ followup_message: message }))
+}
 
-    const isRelevant = (p) =>
-        !EXCLUDE_PATTERNS.some((re) => re.test(p)) &&
-        INCLUDE_PATTERNS.some((re) => re.test(p))
-
-    const relevantPaths = Array.from(
-        new Set(parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)),
-    )
-    if (relevantPaths.length === 0) return
-
-    const changedLines = countChangedLines(relevantPaths)
-    const touchesCoreConfig = relevantPaths.some((p) => CORE_CONFIG_PATTERNS.some((re) => re.test(p)))
-    const touchesArchitecture = relevantPaths.some((p) => ARCHITECTURE_PATTERNS.some((re) => re.test(p)))
-
-    const reasons = []
-    if (relevantPaths.length >= THRESHOLDS.files)
-        reasons.push(`相关文件数 ${relevantPaths.length} ≥ ${THRESHOLDS.files}`)
-    if (changedLines >= THRESHOLDS.lines)
-        reasons.push(`变更行数 ${changedLines} ≥ ${THRESHOLDS.lines}`)
-    if (touchesCoreConfig) reasons.push('触及核心配置')
-    if (touchesArchitecture) reasons.push('触及架构敏感区域')
-    if (reasons.length === 0) return
-
-    const stateFile = resolve(STATE_FILE)
-    const state = readState(stateFile)
-    const signature = diffSignature(relevantPaths)
-    if (signature && signature === state.lastSignature) return
-    writeState(stateFile, { lastSignature: signature, lastTriggerAt: new Date().toISOString() })
-
-    const shown = relevantPaths.slice(0, LIST_LIMIT)
-    const remaining = relevantPaths.length - shown.length
+function buildMessage({ deltaFiles, reasons }) {
+    const shown = deltaFiles.slice(0, LIST_LIMIT)
+    const remaining = deltaFiles.length - shown.length
     const fileList = shown.map((p) => `- ${p}`).join('\n') +
         (remaining > 0 ? `\n- ……还有 ${remaining} 个文件未列出` : '')
 
-    const message = [
-        '本轮检测到较大的代码或架构相关变更，请调用 `project-memory-maintainer` 子代理维护 `.memory/`。',
+    return [
+        '本轮检测到自上次记忆维护以来的累积变更已达到阈值，请调用 `project-memory-maintainer` 子代理维护 `.memory/`。',
         '',
         '触发原因：',
         ...reasons.map((r) => `- ${r}`),
@@ -291,13 +337,112 @@ function main() {
         '记忆维护要求：',
         '- 只记录项目稳定情况、模块边界、数据契约、工程风格、复用入口和已知风险。',
         '- 不要记录本次改了什么，不要把 `.memory` 写成 changelog。',
-        '- 如果没有值得沉淀的稳定项目情况，请 no-op。',
+        '- 维护完成（或确认 no-op）后请执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
+        '- 不刷新基线下次还会再次提示同一批变更。',
         '',
         '相关变更文件：',
         fileList,
     ].join('\n')
+}
 
-    process.stdout.write(JSON.stringify({ followup_message: message }))
+/** 子命令：把当前工作区作为新基线落盘，下次 hook 仅检查相对基线的新增量 */
+function commandMarkDone(stateFile) {
+    if (!inGitRepo()) {
+        process.stdout.write(JSON.stringify({ ok: false, message: '当前不在 git 仓库内' }))
+        return
+    }
+    const allRelevant = Array.from(
+        new Set(parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)),
+    )
+    const fp = computeWorktreeFingerprint(allRelevant)
+    const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
+    const prev = readState(stateFile)
+    writeState(stateFile, {
+        ...prev,
+        baselineHead: head,
+        baselineFingerprint: fp.files,
+        baselineHash: fp.hash,
+        lastMaintainedAt: new Date().toISOString(),
+        lastTriggerHash: null,
+    })
+    process.stdout.write(JSON.stringify({
+        ok: true,
+        message: `已刷新记忆维护基线，已纳入 ${allRelevant.length} 个相关文件`,
+    }))
+}
+
+/** 子命令：清空 hook 状态，下次将作为首次触发处理 */
+function commandReset(stateFile) {
+    writeState(stateFile, {})
+    process.stdout.write(JSON.stringify({ ok: true, message: '已清空 hook 状态' }))
+}
+
+/** 子命令：打印当前状态，便于排查"为何没触发 / 为何反复触发" */
+function commandStatus(stateFile) {
+    const state = readState(stateFile)
+    process.stdout.write(JSON.stringify({ stateFile, config: CONFIG, state }, null, 2))
+}
+
+function main() {
+    const argv = process.argv.slice(2)
+    const stateFile = resolve(STATE_FILE)
+
+    if (argv.includes('--mark-done')) return commandMarkDone(stateFile)
+    if (argv.includes('--reset')) return commandReset(stateFile)
+    if (argv.includes('--status')) return commandStatus(stateFile)
+
+    const force = argv.includes('--force')
+
+    if (!inGitRepo()) return
+
+    const allRelevant = Array.from(
+        new Set(parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)),
+    )
+    if (allRelevant.length === 0) return
+
+    const state = readState(stateFile)
+    const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
+    const currentFp = computeWorktreeFingerprint(allRelevant)
+
+    if (CONFIG.requireHeadAdvance && state.baselineHead === head && !force) return
+    if (!force && currentFp.hash === state.lastTriggerHash) return
+    if (!force && minutesSince(state.lastTriggeredAt) < CONFIG.cooldownMinutes) return
+
+    const deltaFiles = computeDelta(state.baselineFingerprint, currentFp.files)
+    if (deltaFiles.length === 0 && !force) return
+
+    const deltaLines = countLinesAgainstHead(deltaFiles)
+    const touchesCoreConfig = deltaFiles.some((p) =>
+        CORE_CONFIG_PATTERNS.some((re) => re.test(p)))
+    const touchesArchitecture = deltaFiles.some((p) =>
+        ARCHITECTURE_PATTERNS.some((re) => re.test(p)))
+
+    const reasons = []
+    if (deltaFiles.length >= CONFIG.deltaFileThreshold)
+        reasons.push(`自上次维护以来变更文件数 ${deltaFiles.length} ≥ ${CONFIG.deltaFileThreshold}`)
+    if (deltaLines >= CONFIG.deltaLineThreshold)
+        reasons.push(`自上次维护以来变更行数 ${deltaLines} ≥ ${CONFIG.deltaLineThreshold}`)
+    if (touchesCoreConfig) reasons.push('触及核心配置（依赖 / TS / 构建）')
+    if (touchesArchitecture) reasons.push('触及架构敏感区（core / infrastructure / adapters）')
+
+    if (reasons.length === 0 && !force) return
+    if (force && reasons.length === 0) reasons.push('手动强制触发（--force）')
+
+    /**
+     * 这里只更新触发记录，不更新 baseline；
+     * baseline 仅在子代理实际维护后由 `--mark-done` 写入，
+     * 否则用户没真维护就连续触发会被错误地判定为"已处理"。
+     */
+    writeState(stateFile, {
+        ...state,
+        baselineHead: state.baselineHead || head,
+        baselineFingerprint: state.baselineFingerprint || [],
+        baselineHash: state.baselineHash || null,
+        lastTriggerHash: currentFp.hash,
+        lastTriggeredAt: new Date().toISOString(),
+    })
+
+    emitFollowup(buildMessage({ deltaFiles, reasons }))
 }
 
 main()
@@ -337,11 +482,32 @@ main()
 
 不要创建任何业务模块目录——那由子 Agent 在首次实际维护时按项目代码自动生成。
 
+同时把 `.memory/.hook-state.json` 写入 `.gitignore`（运行期状态文件，不应入库）：
+
+```text
+# 项目记忆 hook 运行期状态
+.memory/.hook-state.json
+```
+
+---
+
+## 产物 5：初始化记忆维护基线
+
+四件产物全部就位后，**立即执行一次**：
+
+```bash
+node .cursor/hooks/memory-precheck.mjs --mark-done
+```
+
+这一步至关重要。它会把当前工作区作为"基线"快照落盘到 `.memory/.hook-state.json`。从此 hook 只检查"自基线以来的新增量"，而不是工作区相对 HEAD 的全量差异。
+
+**如果跳过这一步**，第一次 stop 触发时 hook 会把所有未提交的工作区变更全部当作"新增量"提示给你，反而立刻造成一次假性触发。
+
 ---
 
 ## 收尾
 
-四件产物全部就位后，向用户输出一段简短摘要：
+五件事全部就位后，向用户输出一段简短摘要：
 
 ```text
 项目记忆维护体系部署完成：
@@ -349,12 +515,24 @@ main()
 - .cursor/hooks/memory-precheck.mjs
 - .cursor/hooks.json (stop + sessionEnd 已注册)
 - .memory/记忆索引.md / 项目总览.md / 术语表.md / 待确认问题.md
+- .memory/.hook-state.json （已用当前工作区初始化为基线）
+
+触发节奏（默认值）：
+- 自上次维护以来变更文件数 ≥ 5 个，或变更行数 ≥ 200 行，或触及核心配置 / 架构敏感区
+- 同一段冷却期内（默认 30 分钟）只提示一次
+- 工作区指纹未变就跳过（即使过了冷却时间）
+- 想调阈值或冷却时间，改 memory-precheck.mjs 顶部 CONFIG 即可
+
+日常运维命令：
+- node .cursor/hooks/memory-precheck.mjs --mark-done   维护完成或判 no-op 后调用，刷新基线
+- node .cursor/hooks/memory-precheck.mjs --force       绕过冷却与去重，手动强制提示一次
+- node .cursor/hooks/memory-precheck.mjs --status      打印当前 CONFIG 与状态，排查触发问题
+- node .cursor/hooks/memory-precheck.mjs --reset       清空 hook 状态，下次按首次触发处理
 
 接下来：
 - 你下一次较大代码变更结束时，hook 会自动检测并提示主 Agent 调用子代理。
-- 阈值默认 3 个文件 / 80 行变更，可在 memory-precheck.mjs 顶部 THRESHOLDS 调整。
 - 子 Agent 第一次跑会按项目代码自动生成业务模块目录，请审阅它的产物。
-- 建议把 .memory/ 加入 git，但 .memory/.hook-state.json 加入 .gitignore（运行期状态）。
+- 建议把 .memory/ 加入 git；.memory/.hook-state.json 已加入 .gitignore。
 ```
 
 如果项目里没有 `.cursor/rules/**`，最后追加一行提示：
