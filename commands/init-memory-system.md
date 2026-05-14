@@ -45,6 +45,7 @@ description: 一次性为当前项目部署项目记忆维护体系：生成子 
 ---
 name: project-memory-maintainer
 model: inherit
+description: 维护当前项目的中文项目记忆层。较大的代码或架构变更后应主动使用；当变更影响模块边界、API 契约、公共组件、状态、权限、数据访问或项目约定时必须使用；当用户提到项目记忆、记忆维护、项目情况或知识沉淀时必须使用。写入 .memory/** 必须由本后台子 Agent 执行，主 Agent 不得直接编辑 .memory/**。
 is_background: true
 ---
 
@@ -63,6 +64,10 @@ is_background: true
 你不能修改架构规范规则。
 你不能提出实现方案。
 你只能维护 `.memory/**` 目录下的内容。
+
+`.memory/**` 的写入必须发生在本后台子 Agent 内。主 Agent 只能触发或委派你，不能在主流程中直接新增、删除或修改 `.memory/**`。
+
+如果当前环境无法启动本子 Agent，必须停止并说明原因，不能由主 Agent 代替维护记忆。
 
 ## 触发时机
 
@@ -329,12 +334,14 @@ function buildMessage({ deltaFiles, reasons }) {
         (remaining > 0 ? `\n- ……还有 ${remaining} 个文件未列出` : '')
 
     return [
-        '本轮检测到自上次记忆维护以来的累积变更已达到阈值，请调用 `project-memory-maintainer` 子代理维护 `.memory/`。',
+        '本轮检测到自上次记忆维护以来的累积变更已达到阈值，必须调用后台子代理 `project-memory-maintainer` 维护 `.memory/`。',
         '',
         '触发原因：',
         ...reasons.map((r) => `- ${r}`),
         '',
         '记忆维护要求：',
+        '- `.memory/**` 写入必须在 `project-memory-maintainer` 后台子 Agent 内完成，主 Agent 禁止直接编辑 `.memory/**`。',
+        '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
         '- 只记录项目稳定情况、模块边界、数据契约、工程风格、复用入口和已知风险。',
         '- 不要记录本次改了什么，不要把 `.memory` 写成 changelog。',
         '- 维护完成（或确认 no-op）后请执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
@@ -457,16 +464,26 @@ main()
   "version": 1,
   "hooks": {
     "stop": [
-      { "command": "node .cursor/hooks/memory-precheck.mjs" }
+      {
+        "command": "node .cursor/hooks/memory-precheck.mjs",
+        "timeout": 15,
+        "loop_limit": 1,
+        "failClosed": false
+      }
     ],
     "sessionEnd": [
-      { "command": "node .cursor/hooks/memory-precheck.mjs" }
+      {
+        "command": "node .cursor/hooks/memory-precheck.mjs",
+        "timeout": 15,
+        "loop_limit": 1,
+        "failClosed": false
+      }
     ]
   }
 }
 ```
 
-如果 `.cursor/hooks.json` 已存在，**不要直接覆盖**。读取已有内容、合并 stop / sessionEnd 数组、保留其他字段后写回。
+如果 `.cursor/hooks.json` 已存在，**不要直接覆盖**。读取已有内容、合并 stop / sessionEnd 数组、保留其他字段后写回；如果已有同名 hook command 但缺少 `timeout`、`loop_limit` 或 `failClosed`，应补齐这些保护字段。
 
 ## 产物 4：.memory/ 骨架
 
