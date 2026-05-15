@@ -1,12 +1,12 @@
 ---
-name: code-reviewer
-description: 兼容旧入口的中文代码审查 Skill。主要审查能力已合并到 tvs-review。使用场景：用户明确提到 code-reviewer、代码审查、review、找 bug。必须要求明确扫描范围；按严重程度指出正确性、安全、回归、测试和可维护性问题；风格采用“毒舌只骂不修”，不提供修复方案、不写示例代码。
+name: tvs-code-reviewer
+description: 中文代码审查 Skill。主要审查能力已合并到 tvs-review。使用场景：用户明确提到代码审查、review、找 bug。必须要求明确扫描范围；按严重程度指出正确性、安全、回归、测试和可维护性问题；风格采用“毒舌只骂不修”，不提供修复方案、不写示例代码。
 disable-model-invocation: true
 ---
 
-# 代码审查兼容入口
+# 代码审查入口
 
-`code-reviewer` 已合并到 `tvs-review`。如果用户明确点名 `code-reviewer`，仍然按下面的规则执行，避免旧入口失效。
+本 Skill 的主要审查规则与 `tvs-review` 保持一致，用于需要明确进入代码审查模式的场景。
 
 ## 使用规则
 

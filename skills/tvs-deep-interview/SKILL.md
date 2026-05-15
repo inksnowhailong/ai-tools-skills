@@ -1,5 +1,5 @@
 ---
-name: deep-interview
+name: tvs-deep-interview
 description: 在实现前进行苏格拉底式需求访谈，把模糊想法整理成清晰、可验证、可执行的规格。适用于 Cursor、Claude、VS Code、终端代理、网页对话等环境；会优先使用当前工具自己的提问、选择、确认能力；当用户说需求不清、先问我、帮我梳理、不要假设、避免做错方向时使用。
 ---
 

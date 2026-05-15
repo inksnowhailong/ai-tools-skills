@@ -21,17 +21,17 @@ AIConfig/                     ← 仓库根（在你的项目里通常作为 git
 ├── LICENSE
 │
 ├── skills/                   ← Agent Skills，每个 skill 一个文件夹
-│   ├── architect/
+│   ├── tvs-architect/
 │   │   └── SKILL.md
-│   ├── code-reviewer/
-│   ├── deep-interview/
+│   ├── tvs-code-reviewer/
+│   ├── tvs-deep-interview/
 │   ├── tvs-analyze/
 │   ├── tvs-cc-migrator/      （含 scripts/）
 │   ├── tvs-clean-code/
 │   ├── tvs-pullread/
 │   ├── tvs-review/
-│   ├── verify/
-│   └── visual-verdict/
+│   ├── tvs-verify/
+│   └── tvs-visual-verdict/
 │
 ├── commands/                 ← 用户主动触发的命令（slash command）
 │   ├── init-architecture-rules.md
@@ -119,8 +119,8 @@ AIConfig/                     ← 仓库根（在你的项目里通常作为 git
   当前 AI 助手识别为：<工具名>
 
   Skills 安装（X 个）：
-    - architect
-    - code-reviewer
+    - tvs-architect
+    - tvs-code-reviewer
     - ...
 
   Commands 安装（Y 个）：
@@ -179,16 +179,16 @@ AIConfig/                     ← 仓库根（在你的项目里通常作为 git
 
 | 名称 | 用途 |
 |---|---|
-| `architect` | 基于真实代码证据的架构分析与复杂 bug 根因诊断 |
-| `code-reviewer` | 严格的代码审查，按严重程度分类问题 |
-| `deep-interview` | 苏格拉底式需求访谈，把模糊想法整理成可执行规格 |
+| `tvs-architect` | 基于真实代码证据的架构分析与复杂 bug 根因诊断 |
+| `tvs-code-reviewer` | 严格的代码审查，按严重程度分类问题 |
+| `tvs-deep-interview` | 苏格拉底式需求访谈，把模糊想法整理成可执行规格 |
 | `tvs-analyze` | 项目代码结构、依赖、业务分析 |
 | `tvs-cc-migrator` | Claude Code 配置备份与恢复 |
 | `tvs-clean-code` | 代码清洁与整理，添加意图清晰的注释 |
 | `tvs-pullread` | 拉取并通读代码 |
 | `tvs-review` | 严格的代码审查（毒舌风格） |
-| `verify` | 验证功能、修复、UI 变更是否真正生效 |
-| `visual-verdict` | UI 截图与参考图的视觉对比验收 |
+| `tvs-verify` | 验证功能、修复、UI 变更是否真正生效 |
+| `tvs-visual-verdict` | UI 截图与参考图的视觉对比验收 |
 
 ### Commands（2 个）
 

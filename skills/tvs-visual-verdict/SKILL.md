@@ -1,5 +1,5 @@
 ---
-name: visual-verdict
+name: tvs-visual-verdict
 description: 对比生成的 UI 截图与参考图，给出严格的视觉验收结论。使用场景：UI 还原、截图评审、设计稿匹配、间距、字体、布局、颜色、视觉回归检查，以及用户询问页面是否像参考设计。
 ---
 
