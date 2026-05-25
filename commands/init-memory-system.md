@@ -8,6 +8,93 @@ description: 一次性为当前项目部署项目记忆维护体系：生成子 
 
 参数 `$ARGUMENTS` 可选：用户可指定阈值偏好（例如"阈值更宽松"）或运行环境（例如"PowerShell 项目，hook 用 .ps1 实现"）。无参数时按下面默认方案部署。
 
+## PRESETS（按语言/框架切换的配置预设）
+
+本 skill 的机制层（基线 / mark-done / lint-memory / 自检 / 阈值）跟项目栈无关，但触发 PATTERNS 必须按项目栈切换，否则会出现"hook 永远不触发"或"触发频率失调"。
+
+以下是内置的 4 个起步 preset，每个 preset 定义 5 类 PATTERNS：
+
+### preset: nodejs-frontend
+
+INCLUDE_PATTERNS:
+- `/^src\//`, `/^app\//`, `/^pages\//`, `/^components\//`, `/^lib\//`
+- `/^package(-lock)?\.json$/`, `/^pnpm-lock\.yaml$/`, `/^pnpm-workspace\.yaml$/`, `/^yarn\.lock$/`
+- `/^tsconfig.*\.json$/`, `/^jsconfig.*\.json$/`
+- `/^next\.config\./`, `/^vite\.config\./`, `/^nuxt\.config\./`, `/^webpack\.config\./`, `/^tailwind\.config\./`, `/^postcss\.config\./`, `/^vitest\.config\./`, `/^jest\.config\./`, `/^eslint\.config\./`
+- `/^middleware\./`, `/^i18n\//`, `/^public\/images\//`, `/^public\/icons\//`
+
+CORE_CONFIG_PATTERNS:
+- `/^package(-lock)?\.json$/`, `/^pnpm-lock\.yaml$/`, `/^pnpm-workspace\.yaml$/`, `/^yarn\.lock$/`
+- `/^tsconfig.*\.json$/`
+- `/^next\.config\./`, `/^vite\.config\./`, `/^nuxt\.config\./`, `/^middleware\./`
+
+ARCHITECTURE_PATTERNS:
+- `/^src\/lib\/(api|stores|hooks)\//`
+- `/^src\/components\/(layouts|ui)\//`
+- `/^src\/app\/api\//`
+- `/^src\/(auth|middleware)\//`
+
+### preset: nodejs-backend
+
+INCLUDE_PATTERNS:
+- `/^src\//`, `/^lib\//`, `/^routes\//`, `/^controllers\//`, `/^services\//`, `/^models\//`, `/^middleware\//`
+- `/^package(-lock)?\.json$/`, `/^pnpm-lock\.yaml$/`, `/^yarn\.lock$/`
+- `/^tsconfig.*\.json$/`, `/^jsconfig.*\.json$/`
+- `/^nest-cli\./`, `/^vitest\.config\./`, `/^jest\.config\./`, `/^eslint\.config\./`
+
+CORE_CONFIG_PATTERNS:
+- `/^package(-lock)?\.json$/`, `/^pnpm-lock\.yaml$/`, `/^yarn\.lock$/`
+- `/^tsconfig.*\.json$/`, `/^nest-cli\./`
+
+ARCHITECTURE_PATTERNS:
+- `/^src\/(routes|controllers|services|models|middleware)\//`
+- `/^src\/(db|database|prisma|drizzle)\//`
+
+### preset: python
+
+INCLUDE_PATTERNS:
+- `/^src\//`, `/^app\//`, `/^lib\//`, `/^[a-z_]+\/__init__\.py$/`
+- `/^pyproject\.toml$/`, `/^setup\.(py|cfg)$/`, `/^requirements.*\.txt$/`, `/^Pipfile(\.lock)?$/`, `/^poetry\.lock$/`
+- `/^pytest\.ini$/`, `/^mypy\.ini$/`, `/^\.flake8$/`, `/^\.pylintrc$/`, `/^tox\.ini$/`
+- `/^manage\.py$/`, `/^wsgi\.py$/`, `/^asgi\.py$/`
+
+CORE_CONFIG_PATTERNS:
+- `/^pyproject\.toml$/`, `/^setup\.(py|cfg)$/`, `/^requirements.*\.txt$/`, `/^Pipfile(\.lock)?$/`, `/^poetry\.lock$/`
+
+ARCHITECTURE_PATTERNS:
+- `/^src\/(models|services|api|core)\//`
+- `/^app\/(models|views|api)\//`
+
+### preset: go
+
+INCLUDE_PATTERNS:
+- `/^cmd\//`, `/^internal\//`, `/^pkg\//`, `/^api\//`, `/^services\//`
+- `/^go\.mod$/`, `/^go\.sum$/`
+- `/^\.golangci\.ya?ml$/`
+
+CORE_CONFIG_PATTERNS:
+- `/^go\.mod$/`, `/^go\.sum$/`
+
+ARCHITECTURE_PATTERNS:
+- `/^internal\/(domain|usecase|adapter|infrastructure)\//`
+- `/^pkg\/(http|grpc|db)\//`
+
+### 通用 EXCLUDE_PATTERNS（所有 preset 共享）
+
+- `/^\.memory\//`, `/^\.cursor\//`, `/^\.claude\//`, `/^\.omc\//`, `/^\.omx\//`, `/^AIConfig\//`
+- `/^docs\//`, `/^README/i`, `/(^|\/)CHANGELOG/i`
+- `/^\.next\//`, `/^dist\//`, `/^build\//`, `/^out\//`, `/^target\//`, `/^coverage\//`
+- `/^node_modules\//`, `/^__pycache__\//`, `/^vendor\//`, `/^logs\//`
+- `/\.(pyc|pyo|class)$/`
+
+### 通用 lintMemoryStalePathPatterns 占位
+
+每个 preset 都用占位（`src/legacy/`、`src/old/`、`src/deprecated/`）。**真实旧路径每个项目特定**，由项目首次 init 后视情况补进 hook 脚本 CONFIG。
+
+### 扩展指南
+
+如果你的项目栈不在上面 4 个 preset 里（如 Rust / Java / Ruby / Elixir），请直接在本节追加新 preset 定义，并在产物 2 的 `PRESET_REGISTRY` 中注册。模板鼓励社区共建 preset。
+
 ---
 
 ## 你的唯一职责
@@ -31,6 +118,41 @@ description: 一次性为当前项目部署项目记忆维护体系：生成子 
 
 开始前先检查：
 
+### Preset 选择
+
+按以下优先级决定 preset：
+
+1. **显式 `$ARGUMENTS` 指定**：如果用户传 `preset=nodejs-frontend` / `preset=python` 等，按指定值。
+2. **自动检测**（按文件优先级，先找到的优先）：
+   - 存在 `package.json` 且含 next / vite / nuxt 依赖 → `nodejs-frontend`
+   - 存在 `package.json` 且含 express / nest / fastify / koa / hono 依赖 → `nodejs-backend`
+   - 存在 `package.json` 但不含上述任一 → `nodejs-backend` 默认
+   - 存在 `pyproject.toml` / `requirements.txt` / `Pipfile` / `setup.py` → `python`
+   - 存在 `go.mod` → `go`
+   - 都没匹配 → 暂停部署，告知用户"未识别项目栈，请用 `/init-memory-system preset=xxx` 显式指定，或在 PRESETS 节追加新 preset"
+3. 输出选定的 preset 名称给用户确认，例如："检测到项目栈：nodejs-frontend。如需切换，重新运行并指定 preset=..."。
+
+伪代码：
+
+```text
+if $ARGUMENTS contains preset=<name>:
+  selectedPreset = <name>
+else if package.json has next/vite/nuxt:
+  selectedPreset = nodejs-frontend
+else if package.json has express/nest/fastify/koa/hono:
+  selectedPreset = nodejs-backend
+else if package.json exists:
+  selectedPreset = nodejs-backend
+else if pyproject.toml / requirements.txt / Pipfile / setup.py exists:
+  selectedPreset = python
+else if go.mod exists:
+  selectedPreset = go
+else:
+  stop and ask user to specify preset
+```
+
+### 其它前置检查
+
 1. 项目根是否已有 `.cursor/rules/**`？如果没有，提示用户："建议先运行 `/init-architecture-rules` 生成架构规则，再部署记忆系统"，并询问是否仍要继续。
 2. 项目是否在 git 仓库内？Hook 预检脚本依赖 `git`，如果不在 git 仓库，提示用户。
 3. 是否已存在 `.cursor/agents/project-memory-maintainer.md` 或 `.memory/`？如果存在，先读取并询问用户是否覆盖。
@@ -41,7 +163,7 @@ description: 一次性为当前项目部署项目记忆维护体系：生成子 
 
 写入 `.cursor/agents/project-memory-maintainer.md`，内容：
 
-````markdown
+```markdown
 ---
 name: project-memory-maintainer
 model: inherit
@@ -113,9 +235,37 @@ is_background: true
 10. 每次只更新受影响模块，不重写整个记忆层。
 11. 记忆内容应帮助 Agent 判断代码应该放哪里、该复用什么、哪些风格和边界不能破坏。
 
+## 维护后强制自检
+
+写入 `.memory/**` 后，维护员必须执行以下自检，**不通过则禁止刷新基线**：
+
+1. **反查源码路径**：扫描本次新增 / 修改内容中出现的所有源码路径（`src/xxx`）、目录名、API 入口、模块名；对每个路径用 Glob / rg / Read 反查当前源码是否存在。
+2. **路径不存在时三选一**：
+   - 改成当前实际路径。
+   - 明确标注为"历史路径（已迁出，现位置：X）"。
+   - 删除该记忆。
+
+   **禁止把不存在的路径作为当前事实保留。**
+3. **历史路径特别注意**：涉及 `src/lib/`、`src/types/`、`src/components/common`、`src/stores`、`src/constants` 等已弃用路径时，必须显式写明"历史路径"或迁移到当前 `src/core` / `src/shared` / `src/ui`。
+
+这条直接针对 2026-05-25 在 shirehub-central 项目发现的"写完后路径过期、AI 照此放错代码"问题。
+
+## 最小可维护单元 / 信息密度
+
+- **单次维护范围 ≤ 1 个业务模块 / 1 个横切能力**。如果变更跨多个模块，只更新索引 + 最关键模块，剩余写入"待维护清单"，不一次铺开。
+- **浅文档禁令**：如果某个模块的文档只能写出"类型在哪 / API 在哪 / 页面在哪"三句话，应**合并到 `模块档案/总览.md`**，不要单独成册（不要为了"覆盖完整"凑四件套浅文档）。
+- **模块档案的最低质量门**：必须至少包含：
+  - 当前 barrel 入口路径。
+  - 当前数据源 / 适配器（infrastructure 层文件）。
+  - 2-5 条会影响未来改动的红线（已知风险 / 约定 / 不能跨的边界）。
+
+  缺任一项 → 不能标记为完整模块档案，应继续完善或合并。
+
+这条直接针对 shirehub-central 评估中发现的"spaces / members 写 300+ 行，dashboard / compliance / plans 只十几行浅描述"覆盖不均问题，以及 `.memory` 437KB 持续膨胀问题。
+
 ## 维护完成后
 
-无论本轮是真维护了，还是判断 no-op，结束前都要执行一次：
+无论本轮是真维护了，还是判断 no-op，结束前都要先完成"维护后强制自检"；自检通过后执行：
 
 ```bash
 node .cursor/hooks/memory-precheck.mjs --mark-done
@@ -126,11 +276,16 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 ## 输出目标
 
 让未来的 AI Agent 和开发者能快速理解当前项目的业务模块、模块边界、关键流程、工程风格、复用入口和风险点。
-````
+```
 
 ## 产物 2：Hook 预检脚本
 
 写入 `.cursor/hooks/memory-precheck.mjs`，内容：
+
+> 生成脚本前，必须先按"Preset 选择"确定 `selectedPreset`。
+> 下面代码中的 `SELECTED_PRESET = '<selected-preset>'` 必须替换为实际 preset 名。
+> `INCLUDE_PATTERNS` / `CORE_CONFIG_PATTERNS` / `ARCHITECTURE_PATTERNS` 从 `PRESET_REGISTRY[selectedPreset]` 读取；`EXCLUDE_PATTERNS` 为所有 preset 共享。
+> `lintMemoryStalePathPatterns` 使用通用占位，真实旧路径由项目后续维护时按情况补进 CONFIG。
 
 ```javascript
 #!/usr/bin/env node
@@ -154,50 +309,105 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
-/** 视为代码或架构相关变化的路径，至少命中一条才纳入考量 */
-const INCLUDE_PATTERNS = [
-    /^src\//, /^app\//, /^lib\//, /^components\//, /^pages\//,
-    /^server\//, /^backend\//, /^frontend\//,
-    /^core\//, /^infrastructure\//, /^adapters\//, /^views\//,
-    /^packages\/[^/]+\/(src|core|infrastructure|adapters|views)\//,
-    /^apps\/[^/]+\/(src|core|infrastructure|adapters|views)\//,
-    /^package(-lock)?\.json$/,
-    /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/, /^yarn\.lock$/,
-    /^tsconfig.*\.json$/,
-    /^next\.config\./, /^vite\.config\./, /^nuxt\.config\./,
-    /^webpack\.config\./, /^tailwind\.config\./,
-    /^vitest\.config\./, /^jest\.config\./, /^eslint\.config\./,
-]
+// preset: <选定的 preset 名>
+// 安装时必须把 SELECTED_PRESET 替换成前置检查阶段选定的 preset。
+const SELECTED_PRESET = '<selected-preset>'
 
-/** 即使命中 include 也强制排除 */
+const PRESET_REGISTRY = {
+    'nodejs-frontend': {
+        include: [
+            /^src\//, /^app\//, /^pages\//, /^components\//, /^lib\//,
+            /^package(-lock)?\.json$/, /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/, /^yarn\.lock$/,
+            /^tsconfig.*\.json$/, /^jsconfig.*\.json$/,
+            /^next\.config\./, /^vite\.config\./, /^nuxt\.config\./, /^webpack\.config\./,
+            /^tailwind\.config\./, /^postcss\.config\./, /^vitest\.config\./, /^jest\.config\./, /^eslint\.config\./,
+            /^middleware\./, /^i18n\//, /^public\/images\//, /^public\/icons\//,
+        ],
+        coreConfig: [
+            /^package(-lock)?\.json$/, /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/, /^yarn\.lock$/,
+            /^tsconfig.*\.json$/,
+            /^next\.config\./, /^vite\.config\./, /^nuxt\.config\./, /^middleware\./,
+        ],
+        architecture: [
+            /^src\/lib\/(api|stores|hooks)\//,
+            /^src\/components\/(layouts|ui)\//,
+            /^src\/app\/api\//,
+            /^src\/(auth|middleware)\//,
+        ],
+    },
+    'nodejs-backend': {
+        include: [
+            /^src\//, /^lib\//, /^routes\//, /^controllers\//, /^services\//, /^models\//, /^middleware\//,
+            /^package(-lock)?\.json$/, /^pnpm-lock\.yaml$/, /^yarn\.lock$/,
+            /^tsconfig.*\.json$/, /^jsconfig.*\.json$/,
+            /^nest-cli\./, /^vitest\.config\./, /^jest\.config\./, /^eslint\.config\./,
+        ],
+        coreConfig: [
+            /^package(-lock)?\.json$/, /^pnpm-lock\.yaml$/, /^yarn\.lock$/,
+            /^tsconfig.*\.json$/, /^nest-cli\./,
+        ],
+        architecture: [
+            /^src\/(routes|controllers|services|models|middleware)\//,
+            /^src\/(db|database|prisma|drizzle)\//,
+        ],
+    },
+    python: {
+        include: [
+            /^src\//, /^app\//, /^lib\//, /^[a-z_]+\/__init__\.py$/,
+            /^pyproject\.toml$/, /^setup\.(py|cfg)$/, /^requirements.*\.txt$/, /^Pipfile(\.lock)?$/, /^poetry\.lock$/,
+            /^pytest\.ini$/, /^mypy\.ini$/, /^\.flake8$/, /^\.pylintrc$/, /^tox\.ini$/,
+            /^manage\.py$/, /^wsgi\.py$/, /^asgi\.py$/,
+        ],
+        coreConfig: [
+            /^pyproject\.toml$/, /^setup\.(py|cfg)$/, /^requirements.*\.txt$/, /^Pipfile(\.lock)?$/, /^poetry\.lock$/,
+        ],
+        architecture: [
+            /^src\/(models|services|api|core)\//,
+            /^app\/(models|views|api)\//,
+        ],
+    },
+    go: {
+        include: [
+            /^cmd\//, /^internal\//, /^pkg\//, /^api\//, /^services\//,
+            /^go\.mod$/, /^go\.sum$/,
+            /^\.golangci\.ya?ml$/,
+        ],
+        coreConfig: [
+            /^go\.mod$/, /^go\.sum$/,
+        ],
+        architecture: [
+            /^internal\/(domain|usecase|adapter|infrastructure)\//,
+            /^pkg\/(http|grpc|db)\//,
+        ],
+    },
+}
+
+const SELECTED_PRESET_CONFIG = PRESET_REGISTRY[SELECTED_PRESET]
+if (!SELECTED_PRESET_CONFIG) {
+    throw new Error(`未知 memory preset: ${SELECTED_PRESET}`)
+}
+
+/** 视为代码或架构相关变化的路径，至少命中一条才纳入考量 */
+const INCLUDE_PATTERNS = SELECTED_PRESET_CONFIG.include
+
+/** 即使命中 include 也强制排除；所有 preset 共享 */
 const EXCLUDE_PATTERNS = [
-    /^\.memory\//, /^\.cursor\//, /^\.omc\//, /^\.omx\//, /^\.claude\//, /^AIConfig\//,
+    /^\.memory\//, /^\.cursor\//, /^\.claude\//, /^\.omc\//, /^\.omx\//, /^AIConfig\//,
     /^docs\//, /^README/i, /(^|\/)CHANGELOG/i,
-    /^\.next\//, /^dist\//, /^build\//, /^out\//, /^coverage\//,
-    /^node_modules\//, /^logs\//,
+    /^\.next\//, /^dist\//, /^build\//, /^out\//, /^target\//, /^coverage\//,
+    /^node_modules\//, /^__pycache__\//, /^vendor\//, /^logs\//,
+    /\.(pyc|pyo|class)$/,
 ]
 
 /** 命中即视为触及核心配置，自动提升优先级 */
-const CORE_CONFIG_PATTERNS = [
-    /^package(-lock)?\.json$/,
-    /^pnpm-lock\.yaml$/, /^pnpm-workspace\.yaml$/,
-    /^tsconfig.*\.json$/,
-    /^next\.config\./, /^vite\.config\./, /^nuxt\.config\./,
-    /^eslint\.config\./,
-]
+const CORE_CONFIG_PATTERNS = SELECTED_PRESET_CONFIG.coreConfig
 
 /** 命中即视为架构敏感区域，自动提升优先级 */
-const ARCHITECTURE_PATTERNS = [
-    /^core\//, /^infrastructure\//, /^adapters\//,
-    /^packages\/[^/]+\/(core|infrastructure|adapters)\//,
-    /^src\/lib\/(api|request|supabase)\//,
-    /^src\/(stores?|hooks|services|api|types)\//,
-    /^src\/components\/common\//,
-]
+const ARCHITECTURE_PATTERNS = SELECTED_PRESET_CONFIG.architecture
 
 /** 触发阈值与节流配置，按项目实际节奏调整 */
 const CONFIG = {
@@ -209,6 +419,12 @@ const CONFIG = {
     cooldownMinutes: 30,
     /** 是否要求 HEAD 前进（commit 之后）才计入触发分数；默认关闭 */
     requireHeadAdvance: false,
+    /** 旧路径占位；真实旧路径每个项目特定，请按项目情况补进 */
+    lintMemoryStalePathPatterns: [
+        'src/legacy/',
+        'src/old/',
+        'src/deprecated/',
+    ],
 }
 
 const STATE_FILE = '.memory/.hook-state.json'
@@ -344,7 +560,19 @@ function buildMessage({ deltaFiles, reasons }) {
         '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
         '- 只记录项目稳定情况、模块边界、数据契约、工程风格、复用入口和已知风险。',
         '- 不要记录本次改了什么，不要把 `.memory` 写成 changelog。',
-        '- 维护完成（或确认 no-op）后请执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
+        '',
+        'mark-done 质量闸门：',
+        '- 维护完成后，先输出自检摘要：本次更新文件清单、反查过的源码路径、发现并处理的过期路径、未能确认的问题。',
+        '- 未能确认的问题应写入 `待确认问题.md`，不能混入模块档案伪造成当前事实。',
+        '- 如果路径不存在但被作为当前事实保留、来源标注无法在源码中找到对应文件、或模块文档只有浅描述且不达最低质量门，禁止执行 `--mark-done`。',
+        '- 禁止刷新基线时，应把未解决问题写入 `待确认问题.md`，或通过回执返回 blocked。',
+        '- 通过自检后再执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
+        '',
+        '--lint-memory 子命令：',
+        '- `node .cursor/hooks/memory-precheck.mjs --lint-memory` 扫描 `.memory/**` 中是否出现旧路径模式。',
+        '- 默认旧路径模式使用 CONFIG.lintMemoryStalePathPatterns 占位：`src/legacy/`、`src/old/`、`src/deprecated/`。',
+        '- 命中且未带"历史" / "已迁出"等上下文时返回非零，视为 lint 失败。',
+        '- 该子命令可用于 CI / 定期任务检查 memory 是否漂移；真实旧路径每个项目特定，请按项目情况补进 CONFIG。',
         '- 不刷新基线下次还会再次提示同一批变更。',
         '',
         '相关变更文件：',
@@ -390,6 +618,73 @@ function commandStatus(stateFile) {
     process.stdout.write(JSON.stringify({ stateFile, config: CONFIG, state }, null, 2))
 }
 
+function listMarkdownFiles(dir) {
+    if (!existsSync(dir)) return []
+
+    const files = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = resolve(dir, entry.name)
+        if (entry.isDirectory()) {
+            files.push(...listMarkdownFiles(fullPath))
+            continue
+        }
+
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+            files.push(fullPath)
+        }
+    }
+
+    return files
+}
+
+function hasHistoryContext(lines, index) {
+    const contextWords = ['历史', '已迁出', '历史路径', '过去路径', '迁移自']
+    const from = Math.max(0, index - 2)
+    const to = Math.min(lines.length - 1, index + 2)
+    const context = lines.slice(from, to + 1).join('\n')
+    return contextWords.some((word) => context.includes(word))
+}
+
+/**
+ * 子命令：递归扫描 `.memory/` 下的 Markdown 文件中未标注历史语境的旧路径。
+ *
+ * 目的：阻止过期目录被继续写成"当前事实"，污染长期项目记忆。
+ */
+function commandLintMemory() {
+    const memoryRoot = resolve('.memory')
+    const files = listMarkdownFiles(memoryRoot)
+    const hits = []
+
+    for (const file of files) {
+        const text = readFileSync(file, 'utf8')
+        const lines = text.split(/\r?\n/)
+        lines.forEach((lineContent, index) => {
+            for (const pattern of CONFIG.lintMemoryStalePathPatterns) {
+                if (!lineContent.includes(pattern)) continue
+                if (hasHistoryContext(lines, index)) continue
+
+                hits.push({
+                    file: normalizePath(file),
+                    line: index + 1,
+                    lineContent,
+                    pattern,
+                })
+            }
+        })
+    }
+
+    const ok = hits.length === 0
+    process.stdout.write(JSON.stringify({
+        ok,
+        total_files: files.length,
+        hits,
+        message: ok
+            ? '未发现未标注历史语境的旧路径'
+            : `发现 ${hits.length} 处疑似未标注历史语境的旧路径`,
+    }, null, 2))
+    process.exit(ok ? 0 : 1)
+}
+
 function main() {
     const argv = process.argv.slice(2)
     const stateFile = resolve(STATE_FILE)
@@ -397,6 +692,7 @@ function main() {
     if (argv.includes('--mark-done')) return commandMarkDone(stateFile)
     if (argv.includes('--reset')) return commandReset(stateFile)
     if (argv.includes('--status')) return commandStatus(stateFile)
+    if (argv.includes('--lint-memory')) return commandLintMemory()
 
     const force = argv.includes('--force')
 
@@ -430,7 +726,7 @@ function main() {
     if (deltaLines >= CONFIG.deltaLineThreshold)
         reasons.push(`自上次维护以来变更行数 ${deltaLines} ≥ ${CONFIG.deltaLineThreshold}`)
     if (touchesCoreConfig) reasons.push('触及核心配置（依赖 / TS / 构建）')
-    if (touchesArchitecture) reasons.push('触及架构敏感区（core / infrastructure / adapters）')
+    if (touchesArchitecture) reasons.push(`触及架构敏感区（preset: ${SELECTED_PRESET}）`)
 
     if (reasons.length === 0 && !force) return
     if (force && reasons.length === 0) reasons.push('手动强制触发（--force）')
@@ -528,6 +824,7 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 
 ```text
 项目记忆维护体系部署完成：
+- 选定 preset: <name>
 - .cursor/agents/project-memory-maintainer.md
 - .cursor/hooks/memory-precheck.mjs
 - .cursor/hooks.json (stop + sessionEnd 已注册)
@@ -545,6 +842,7 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 - node .cursor/hooks/memory-precheck.mjs --force       绕过冷却与去重，手动强制提示一次
 - node .cursor/hooks/memory-precheck.mjs --status      打印当前 CONFIG 与状态，排查触发问题
 - node .cursor/hooks/memory-precheck.mjs --reset       清空 hook 状态，下次按首次触发处理
+- node .cursor/hooks/memory-precheck.mjs --lint-memory 扫描 .memory 中未标注历史语境的旧路径
 
 接下来：
 - 你下一次较大代码变更结束时，hook 会自动检测并提示主 Agent 调用子代理。
