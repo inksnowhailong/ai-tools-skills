@@ -26,14 +26,12 @@ AIConfig/
 │   ├── tvs-clean-code/
 │   ├── tvs-code-reviewer/
 │   ├── tvs-deep-interview/
+│   ├── tvs-init-memory-system/
 │   ├── tvs-inksnow-arch/
 │   ├── tvs-mind-seed/
 │   ├── tvs-pullread/
-│   ├── tvs-review/
 │   ├── tvs-team-spawn/
 │   └── tvs-verify/
-├── commands/
-│   └── init-memory-system.md
 ├── rules/
 │   ├── coding-rules.md
 │   ├── role.md
@@ -86,7 +84,6 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 | `tvs-deep-interview` | 中文深度需求访谈，通过单问题追问、拓扑确认、歧义评分和审批闸门，把模糊想法变成规格。 | 用户需求不清、怕做错方向、需要先问清楚再实现。 | Cursor、Claude Code、Codex、Cline、Roo |
 | `tvs-clean-code` | 清理代码结构、命名、冗余和注释，让意图更清晰。 | 代码可读性差、函数太乱、需要补关键中文注释。 | Cursor、Claude Code、Codex、Cline |
 | `tvs-code-reviewer` | 稳定、证据驱动的代码审查，按固定通道找漏洞、坏味道和真实问题。 | 审当前 diff、审 PR、找 bug、找坏代码、毒舌审查。 | Cursor、Claude Code、Codex、Cline |
-| `tvs-review` | 严格代码审查入口，偏“只骂不修”，输出问题和风险，不给修复代码。 | 用户明确要求 code review、找问题、只指出风险。 | Cursor、Claude Code、Codex、Cline |
 | `tvs-verify` | 验证刚刚 AI 做的改动是否真的解决了用户原始问题。 | 用户问“刚才改好了吗”“确认是否完成”“看看是否真修好了”。 | Cursor、Claude Code、Codex、Cline |
 
 ### 协作、记忆与迁移
@@ -95,14 +92,13 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 |---|---|---|---|
 | `tvs-team-spawn` | 一次性为 Cursor 项目安装多 Agent 团队协作系统：leader/sub、邮箱、黑板、stop hook。 | 想在 Cursor 里搭建多 chat 团队、leader 编排、sub agent 协作、邮箱通信。 | Cursor 专用 |
 | `tvs-mind-seed` | 给单个 agent 初始化私有记忆系统，生成 profile/personality/active/index 等记忆文件。 | `tvs-team-spawn` 后给每个成员建记忆，或给独立 chat 建可恢复画像。 | Cursor 专用 |
+| `tvs-init-memory-system` | 为当前项目一次性部署项目记忆维护体系，并配置 codegraph 分工路由。 | 明确要求部署项目记忆系统、初始化 `.memory`、安装记忆维护 hook。 | Cursor 专用 |
 | `tvs-cc-migrator` | Claude Code 配置备份与恢复工具。 | 换电脑、备份 `~/.claude`、迁移 rules/skills/commands/agents/settings。 | Claude Code 最佳；Cursor 可辅助迁移 |
 | `tvs-pullread` | 拉取并通读远程代码，帮助理解远程分支/PR 的真实实现。 | 读 PR、同步远端、理解别人改了什么、分析远程业务逻辑。 | Cursor、Claude Code、Codex |
 
 ## Commands
 
-| Command | 简介 | 应用场景 | 适合工具 |
-|---|---|---|---|
-| `/init-memory-system` | 为当前项目一次性部署项目记忆维护体系：后台子 Agent、hook 预检脚本、`.memory/` 骨架。 | 想让项目自动沉淀业务记忆、模块边界、风险点和复用入口。 | Cursor 最佳；其他工具需手动适配 hook/subagent |
+当前没有独立 Command。原 `/init-memory-system` 已迁移为 `tvs-init-memory-system` Skill。
 
 > 架构规则初始化已经迁移到 `tvs-inksnow-arch`。它比旧的 `/init-architecture-rules` 更完整：先生成架构 RFC，用户批准后再落地 `.cursor/rules/**`。
 

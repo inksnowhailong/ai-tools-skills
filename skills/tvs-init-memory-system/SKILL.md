@@ -1,12 +1,78 @@
 ---
-description: 一次性为当前项目部署项目记忆维护体系：生成子 Agent + Hook 预检脚本 + .memory/ 目录骨架 + hooks.json 注册。
+name: tvs-init-memory-system
+description: 一次性为当前项目部署"记忆系统 + codegraph 分工配合"。生成 7 件产物：子 Agent / Hook 预检脚本 / hooks.json / .memory 骨架 / codegraph 自动安装 / 分工路由 rules / 初始化基线。**显式调用、不自动触发**——仅当用户明示"运行 tvs-init-memory-system / 部署记忆系统 / init memory / 初始化项目记忆"等需求时，由用户手动唤起本 Skill；AI 不得仅因 description 关键词命中就主动加载执行。
+disable-model-invocation: true
 ---
 
-# /init-memory-system
+# tvs-init-memory-system：一次性部署记忆系统 + codegraph 分工配合
 
-你被显式调用来为当前项目**一次性安装**项目记忆维护体系。这是一次性工程动作，跑完就结束，不是日常能力。
+> **⚠️ 调用约束**：本 Skill **不会被 AI 自动触发**（frontmatter 已声明 `disable-model-invocation: true`）。必须由用户在对话中显式说出"运行 tvs-init-memory-system / 部署记忆系统 / 初始化项目记忆"或等价指令后，AI 才应当读入本文件并按下面流程执行。如果你（AI）只是因为对话里出现了"记忆系统"四个字就想自动跑本 Skill，请**停下**——这不在本 Skill 的允许触发范围内。
 
-参数 `$ARGUMENTS` 可选：用户可指定阈值偏好（例如"阈值更宽松"）或运行环境（例如"PowerShell 项目，hook 用 .ps1 实现"）。无参数时按下面默认方案部署。
+你被显式调用来为当前项目**一次性安装**项目记忆维护体系（v2：与 codegraph 分工配合）。这是一次性工程动作，跑完就结束，不是日常能力。
+
+**调用方式**：
+
+```text
+用户在对话里说"运行 tvs-init-memory-system"或等价表达（"部署记忆系统"、"初始化项目记忆"、"装一下记忆系统"等）。
+AI 读入本 SKILL.md，按下面流程逐步执行；执行完毕收尾摘要并停止，不进入日常维护态。
+```
+
+**用户传入的关键词 / 参数**（可选）：用户可一并说明阈值偏好（例如"阈值更宽松"）或运行环境（例如"PowerShell 项目，hook 用 .ps1 实现"）或 preset 切换（例如"preset=python"）。无明确参数时按下面默认方案部署。
+
+---
+
+## 分工边界声明（codegraph × .memory）
+
+本系统从 v2 开始**与 codegraph 协同部署、但保持各自独立**。两套系统走完全不同的方向，互为补充，**互不依赖**。
+
+### 设计哲学
+
+```text
+codegraph  →  代码结构事实层（机器写、机器读、秒级新鲜）
+.memory    →  业务领域知识层（人/子 Agent 写、长期稳定、慢更新）
+
+二者并行、不互相侵入。子 Agent 维护 .memory 时不调用 codegraph。
+codegraph 不可用时 .memory 依然完整运行。
+```
+
+### codegraph 专长（让它答这些，.memory 不重复记录）
+
+| 问题类型 | codegraph 入口 |
+|---|---|
+| X 函数 / 类 / 方法在哪定义 | `codegraph_search` |
+| X 调用了什么 / 被谁调用 | `codegraph_callers` / `codegraph_callees` |
+| 改 X 会影响哪些代码 | `codegraph_impact` |
+| 从 X 到 Y 的调用路径是什么 | `codegraph_trace` |
+| 模块 X 的代码地图（barrel、文件结构） | `codegraph_context` / `codegraph_files` |
+| 某个符号的源代码 / 签名 | `codegraph_node` / `codegraph_explore` |
+
+### .memory 专长（让它答这些，codegraph 答不出）
+
+| 问题类型 | .memory 入口 |
+|---|---|
+| 这个模块**业务上**负责什么 | 模块档案 - 模块职责 |
+| 项目里的术语 / 别名 / 同义词 | 术语表.md |
+| 哪些模块**不能**互相调用 / 跨模块协作契约 | 模块档案 - 跨模块协作契约 |
+| 为什么这块代码这么设计 / 历史决策 | 模块档案 - 设计决策 |
+| 哪些边界一旦破坏会出问题 / 红线 | 模块档案 - 红线 |
+| 该模块当前已知的风险 / 坑 | 模块档案 - 已知风险 |
+| 项目稳定的工程风格与约定 | 项目总览.md |
+
+### 不互相侵入原则
+
+- **.memory 不再记录纯代码结构信息**：barrel 路径、数据源/适配器、调用链这些"AST 看一眼就知道"的内容，让 codegraph 答；.memory 只在它有业务含义时才记录（如"这个 barrel 名字本身代表领域内核边界"）。
+- **子 Agent 不调用 codegraph 工具**：维护 .memory 时仍使用 Glob / rg / Read 反查源码路径。我们刻意**不把 codegraph 作为子 Agent 的依赖**，原因有二：（a）让子 Agent 调用次数保持最少；（b）保证 codegraph 未装/装失败/语言不支持时 .memory 依然能跑。
+- **codegraph 自带的 `.cursor/rules/codegraph.mdc` 我们不改**：那是 codegraph 自己负责的"怎么用 codegraph 工具"指南。本命令只生成一份**分工路由**规则（见产物 6），告诉 AI"业务问题查 .memory、结构问题查 codegraph"，不与之重叠。
+
+### 为什么明明可被替代仍然不替代
+
+| 看似可被 codegraph 替代的能力 | 为什么我们仍**不替代** |
+|---|---|
+| 子 Agent "反查源码路径"用 Glob/rg/Read | 替代成 codegraph 反查会让子 Agent 调用次数变多，违背"子 Agent 调用更少"目标 |
+| lint-memory 字符串模式扫描旧路径 | 同上；且 lint 是 CI / 定期任务，不应依赖 MCP 服务可用性 |
+| 模块档案记 barrel / 数据源 | 这是 codegraph 强项，让 .memory 让位；但**业务含义部分**仍保留 |
+
+---
 
 ## PRESETS（按语言/框架切换的配置预设）
 
@@ -105,11 +171,15 @@ ARCHITECTURE_PATTERNS:
 2. `.cursor/hooks/memory-precheck.mjs` — Hook 预检脚本，stop / sessionEnd 触发前判断变更是否值得维护记忆
 3. `.cursor/hooks.json` — Hook 注册文件
 4. `.memory/` 目录骨架 — `记忆索引.md`、`项目总览.md`、`术语表.md`、`待确认问题.md`（留空骨架，业务模块目录由子 Agent 后续按需创建）
+5. **codegraph 检测与自动安装** — 检测 CLI / 索引状态，未装则 `npm i -g @colbymchenry/codegraph`，未 init 则 `codegraph init -i`（全自动一错到底，装失败不阻塞）
+6. **`.cursor/rules/05-memory-vs-codegraph-routing.mdc`** — 分工路由规则文件，告诉 AI"业务问题查 .memory、结构问题查 codegraph、不要互相侵入"（只写路由，不重写工具表，工具表交给 codegraph 自带的 `.cursor/rules/codegraph.mdc`）
+7. 一次性执行 `node .cursor/hooks/memory-precheck.mjs --mark-done` 把当前工作区作为初始基线
 
 不做：
 
 - 不修改业务代码、不修改依赖。
-- 不生成 `.cursor/rules/**`（那是 `/init-architecture-rules` 的职责）。
+- 不生成**通用** `.cursor/rules/**`（那是 `/init-architecture-rules` 的职责）。**唯一破例**：分工路由规则 `05-memory-vs-codegraph-routing.mdc`，因为它跟记忆系统紧耦合，必须在此处一并部署。
+- 不修改 codegraph 自带的 `.cursor/rules/codegraph.mdc`（那是 codegraph init 时自动写入的，归 codegraph 自己管）。
 - 不直接写记忆内容——只搭骨架，记忆由子 Agent 后续自动维护。
 
 ---
@@ -122,20 +192,20 @@ ARCHITECTURE_PATTERNS:
 
 按以下优先级决定 preset：
 
-1. **显式 `$ARGUMENTS` 指定**：如果用户传 `preset=nodejs-frontend` / `preset=python` 等，按指定值。
+1. **用户参数显式指定**：如果用户在调用本 Skill 时同时说明 `preset=nodejs-frontend` / `preset=python` 等（或自然语言表达"用 python preset"），按指定值。
 2. **自动检测**（按文件优先级，先找到的优先）：
    - 存在 `package.json` 且含 next / vite / nuxt 依赖 → `nodejs-frontend`
    - 存在 `package.json` 且含 express / nest / fastify / koa / hono 依赖 → `nodejs-backend`
    - 存在 `package.json` 但不含上述任一 → `nodejs-backend` 默认
    - 存在 `pyproject.toml` / `requirements.txt` / `Pipfile` / `setup.py` → `python`
    - 存在 `go.mod` → `go`
-   - 都没匹配 → 暂停部署，告知用户"未识别项目栈，请用 `/init-memory-system preset=xxx` 显式指定，或在 PRESETS 节追加新 preset"
+   - 都没匹配 → 暂停部署，告知用户"未识别项目栈，请重新调用本 Skill 并明确指定 `preset=xxx`（如 `运行 tvs-init-memory-system，preset=python`），或在 PRESETS 节追加新 preset"
 3. 输出选定的 preset 名称给用户确认，例如："检测到项目栈：nodejs-frontend。如需切换，重新运行并指定 preset=..."。
 
 伪代码：
 
 ```text
-if $ARGUMENTS contains preset=<name>:
+if 用户调用参数包含 preset=<name>:
   selectedPreset = <name>
 else if package.json has next/vite/nuxt:
   selectedPreset = nodejs-frontend
@@ -156,6 +226,16 @@ else:
 1. 项目根是否已有 `.cursor/rules/**`？如果没有，提示用户："建议先运行 `/init-architecture-rules` 生成架构规则，再部署记忆系统"，并询问是否仍要继续。
 2. 项目是否在 git 仓库内？Hook 预检脚本依赖 `git`，如果不在 git 仓库，提示用户。
 3. 是否已存在 `.cursor/agents/project-memory-maintainer.md` 或 `.memory/`？如果存在，先读取并询问用户是否覆盖。
+4. **codegraph 与 Node 可用性检测**（仅记录状态，不在此处执行安装；具体安装逻辑见产物 5）：
+   - `node --version` / `npm --version`：判断 Node 工具链是否可用
+   - `codegraph --version`（或 `where codegraph` / `which codegraph`）：判断 codegraph CLI 是否已全局安装
+   - 检查 `.codegraph/codegraph.db`：判断当前项目是否已 init
+   
+   把这三项结果记入临时变量 `CODEGRAPH_STATE`：
+   - `ready`：CLI 已装 + 索引已存在 → 产物 5 跳过执行
+   - `cli_only`：CLI 已装但 `.codegraph/` 不存在 → 产物 5 只跑 `codegraph init -i`
+   - `missing`：CLI 未装但 Node 可用 → 产物 5 走完整链（`npm i -g` → `codegraph init -i`）
+   - `no_node`：Node/npm 都不可用 → 产物 5 跳过，并在收尾摘要标记"codegraph: 缺少 Node 工具链"
 
 ---
 
@@ -228,7 +308,7 @@ is_background: true
 3. 每个模块记录：模块职责、业务流程、数据契约、关键规则、已知风险。
 4. 记忆文件不是变更日志，不记录"本次改了什么"。
 5. 只记录项目稳定情况，不记录临时猜测。
-6. 不复述代码实现细节，除非它影响业务理解、模块边界、工程风格或未来维护。
+6. 不复述代码实现细节，也不重复 codegraph 答得了的纯结构信息（调用关系、数据源路径、调用链、符号位置）——除非该结构信息**本身承载业务含义**（如"刻意只对接 X 服务以满足合规约束"）。结构信息查询请走 `codegraph_*` 工具，本档不再重复。
 7. 每条重要记忆必须标注来源文件。
 8. 不确定内容写入"待确认问题.md"，不能伪造成事实。
 9. 没有值得沉淀的项目知识则 no-op，不要强行更新。
@@ -254,14 +334,28 @@ is_background: true
 
 - **单次维护范围 ≤ 1 个业务模块 / 1 个横切能力**。如果变更跨多个模块，只更新索引 + 最关键模块，剩余写入"待维护清单"，不一次铺开。
 - **浅文档禁令**：如果某个模块的文档只能写出"类型在哪 / API 在哪 / 页面在哪"三句话，应**合并到 `模块档案/总览.md`**，不要单独成册（不要为了"覆盖完整"凑四件套浅文档）。
-- **模块档案的最低质量门**：必须至少包含：
-  - 当前 barrel 入口路径。
-  - 当前数据源 / 适配器（infrastructure 层文件）。
-  - 2-5 条会影响未来改动的红线（已知风险 / 约定 / 不能跨的边界）。
+- **模块档案的最低质量门**（v2 版：与 codegraph 配合，去结构化、强化业务化）：
 
-  缺任一项 → 不能标记为完整模块档案，应继续完善或合并。
+  必填字段（全部具备才能标记为完整模块档案）：
+  - **模块职责**：一句话讲清这个业务模块负责什么。
+  - **术语 / 别名 / 同义词**：本模块涉及的领域名词（同一概念在 UI / API / 数据库 / 文档里的不同叫法也要列）。
+  - **跨模块协作契约**：本模块可以被谁调用 / 可以调用谁；以及对应的禁止关系（谁不能调用它 / 它不能调用谁）。
+  - **设计决策**：当前形态的关键设计理由（"为什么是这样而不是那样"），至少 1 条。
+  - **2-5 条红线**：已知风险 / 约定 / 一旦破坏会出问题的边界。
+  
+  选填字段（仅当它们承载业务含义时才记录；纯结构信息已由 codegraph 接管）：
+  - **当前 barrel 入口路径**——仅当入口命名本身有业务含义时（如 `core/spaces/` 表达"领域内核边界"）；否则不记，让 `codegraph_context` / `codegraph_files` 答。
+  
+  **不再记录**的字段（之前需要、现已划归 codegraph）：
+  - 数据源 / 适配器的纯文件路径
+  - 调用关系 / 调用链
+  - barrel 的字面路径（不附带业务解释时）
+  
+  这些由 `codegraph_callers` / `codegraph_callees` / `codegraph_context` / `codegraph_files` 一查就有，本档不重复。
+  
+  缺任一**必填项** → 不能标记为完整模块档案，应继续完善或合并。
 
-这条直接针对 shirehub-central 评估中发现的"spaces / members 写 300+ 行，dashboard / compliance / plans 只十几行浅描述"覆盖不均问题，以及 `.memory` 437KB 持续膨胀问题。
+这条直接针对 shirehub-central 评估中发现的"spaces / members 写 300+ 行，dashboard / compliance / plans 只十几行浅描述"覆盖不均问题，以及 `.memory` 437KB 持续膨胀问题。同时 v2 版通过"去结构化、强化业务化"，让 .memory 与 codegraph 分工更清晰、子 Agent 调用频率自然降低（业务知识变化比代码结构慢得多）。
 
 ## 维护完成后
 
@@ -795,16 +889,158 @@ main()
 
 不要创建任何业务模块目录——那由子 Agent 在首次实际维护时按项目代码自动生成。
 
-同时把 `.memory/.hook-state.json` 写入 `.gitignore`（运行期状态文件，不应入库）：
+同时把以下运行期状态文件写入 `.gitignore`（不应入库）：
 
 ```text
 # 项目记忆 hook 运行期状态
 .memory/.hook-state.json
+# codegraph 状态汇总（由产物 5 写入）
+.memory/.codegraph-status.json
 ```
 
 ---
 
-## 产物 5：初始化记忆维护基线
+## 产物 5：codegraph 检测与自动安装
+
+按前置检查阶段记录的 `CODEGRAPH_STATE` 决定执行路径。**全自动一错到底**链：未装就装、装了未 init 就 init；任何一步失败都**不阻塞**主流程，只在收尾摘要里记入降级状态。
+
+### 执行分支
+
+| `CODEGRAPH_STATE` | 执行动作 | 完成后 `CODEGRAPH_STATUS` |
+|---|---|---|
+| `ready` | 跳过整个产物 5 | `ready` |
+| `cli_only` | 执行 `codegraph init -i` | `init_done`（成功）/ `init_failed`（失败） |
+| `missing` | 先 `npm i -g @colbymchenry/codegraph`，成功后再 `codegraph init -i` | `ready`（全成功）/ `install_failed`（npm 失败）/ `init_failed`（init 失败） |
+| `no_node` | 跳过全部 | `no_node` |
+
+### 执行规则
+
+- 任何一步**失败都不抛出**，而是把错误信息收集到 `CODEGRAPH_STATUS` 里供收尾摘要使用。
+- `npm i -g` 失败的常见原因（无网络 / 权限不足 / 仓库 403）应当在摘要里展示原始 npm 错误前 200 字符，方便用户排查。
+- `codegraph init -i` 即使没成功也不要重试——交给用户手动跑。
+
+### 降级路径（核心约束之一）
+
+无论 codegraph 处于哪种状态，**产物 6（rules 文件）一定要生成**，且其内容会根据 `CODEGRAPH_STATUS` 在末尾追加合适的降级提示：
+
+- `ready` / `init_done` → rules 正常输出"分工路由：业务问题查 .memory、结构问题查 codegraph"
+- `install_failed` / `init_failed` / `no_node` → rules 额外追加一段"本项目当前 codegraph 不可用，AI 遇到结构问题请回退到 Grep / Read；用户可后续手动运行 `npm i -g @colbymchenry/codegraph && codegraph init -i` 启用 codegraph 后再次跑本命令的 `--rebuild-rules` 子命令重写规则文件"
+
+这样保证：**codegraph 不在场时 .memory 仍能完整运行**，AI 也清楚该怎么降级到原生工具。
+
+### 项目语言不在 codegraph 支持范围内
+
+`codegraph init -i` 自己会处理"语言不识别"的情况——跳过这些文件、仍然成功 init，只是索引内容为空。本命令**不预先判断**，把这一步交给 codegraph 自己。如果 init 成功但 `.codegraph/codegraph.db` 是空索引，AI 查 codegraph 时自然查不到东西、转而走 Grep/Read，这是预期降级行为，不视为错误。
+
+### 状态汇总落盘
+
+执行完毕后，把 `CODEGRAPH_STATUS` 写入 `.memory/.codegraph-status.json`（不入库，加入 `.gitignore`）：
+
+```json
+{
+  "status": "ready | init_done | install_failed | init_failed | no_node",
+  "checkedAt": "<ISO 时间>",
+  "cliPath": "<codegraph CLI 路径 或 null>",
+  "dbPath": ".codegraph/codegraph.db",
+  "error": "<原始错误前 200 字符 或 null>"
+}
+```
+
+后续如果用户手动装好了 codegraph，可以删掉这个文件，hook 自然不再报告"codegraph 不可用"。
+
+---
+
+## 产物 6：分工路由 rules（破例生成 `.cursor/rules/`）
+
+写入 `.cursor/rules/05-memory-vs-codegraph-routing.mdc`。本规则**只写"业务问题查哪、结构问题查哪"的路由**，不重写 codegraph 工具表（那由 codegraph 自带的 `.cursor/rules/codegraph.mdc` 负责）。
+
+> 编号 `05-` 故意排在 `04-memory-maintenance-boundary` 之后；如果项目已有更高编号的规则文件，按需调整编号。
+
+文件内容（按 `CODEGRAPH_STATUS` 在最后追加不同的"降级提示"块）：
+
+````markdown
+---
+description: .memory 与 codegraph 的分工路由 —— 业务问题查 .memory、结构问题查 codegraph，互不侵入。
+alwaysApply: true
+---
+
+# 记忆层分工路由：.memory × codegraph
+
+本项目同时部署了两套互补的"记忆"层，请按问题类型走对应入口，**不要互相侵入**。
+
+## 路由决策表
+
+| 你想知道 | 走哪 | 入口（举例） |
+|---|---|---|
+| 这个模块业务上负责什么 | `.memory` | `.memory/模块档案/<模块>/总览.md` |
+| 项目里 X 是什么术语 / 别名 | `.memory` | `.memory/术语表.md` |
+| 哪些模块**不能**互相调用 / 跨模块协作契约 | `.memory` | 模块档案 - 跨模块协作契约 |
+| 为什么这块代码这么设计 / 决策来源 | `.memory` | 模块档案 - 设计决策 |
+| 红线 / 不能跨的边界 / 已知风险 | `.memory` | 模块档案 - 红线 / 已知风险 |
+| 项目稳定的工程风格与约定 | `.memory` | `.memory/项目总览.md` |
+| —— | —— | —— |
+| X 函数 / 类 / 方法在哪定义 | `codegraph` | `codegraph_search` |
+| X 调用了什么 / 被谁调用 | `codegraph` | `codegraph_callers` / `codegraph_callees` |
+| 改 X 会影响哪些代码 | `codegraph` | `codegraph_impact` |
+| 从 X 到 Y 的调用路径 | `codegraph` | `codegraph_trace` |
+| 模块 X 的代码地图（文件、barrel） | `codegraph` | `codegraph_context` / `codegraph_files` |
+| 某个符号的源码 / 签名 | `codegraph` | `codegraph_node` / `codegraph_explore` |
+
+## 反模式（请避免）
+
+- ❌ 把 `.memory` 当代码地图用：去那里翻"X 在哪个文件"——`.memory` 不记纯结构信息。
+- ❌ 让 codegraph 总结业务：它只看 AST，看不到"为什么这么写"。
+- ❌ 同一信息两处都写：会产生漂移；纯结构归 codegraph，业务语义归 `.memory`。
+- ❌ 写代码时只查一边：业务约束（.memory）和结构事实（codegraph）是互补的，复杂改动需要同时参考两者。
+
+## 子 Agent 边界
+
+`project-memory-maintainer` 子 Agent 维护 `.memory/**` 时**不调用 codegraph 工具**，仍使用 Glob / rg / Read 反查源码路径。这是刻意设计：
+
+- 保持子 Agent 调用次数尽可能少
+- 保证 codegraph 不可用时 `.memory` 仍能完整运行
+
+如果你是子 Agent，请遵守这条边界。
+````
+
+### 按 `CODEGRAPH_STATUS` 在文件末尾追加降级块
+
+- `ready` / `init_done` → 在文件末尾追加：
+
+```markdown
+
+## codegraph 当前状态
+
+✅ codegraph 已就绪。请按上面的路由决策表正常使用。
+```
+
+- `install_failed` / `init_failed` / `no_node` → 在文件末尾追加：
+
+```markdown
+
+## codegraph 当前状态
+
+⚠️ **本项目当前 codegraph 不可用**（状态：<install_failed | init_failed | no_node>）。
+
+降级处理：
+- AI 遇到上表中"结构问题"行的需求时，**回退到 Grep / Read** 工具。
+- 用户可后续手动运行 `npm i -g @colbymchenry/codegraph && codegraph init -i` 启用 codegraph。
+- 启用后请删除 `.memory/.codegraph-status.json`，下次会话 AI 即可重新走 codegraph 路由。
+
+`.memory/` 部分不受 codegraph 状态影响，业务问题路由照常使用。
+```
+
+### 若 `.cursor/rules/05-memory-vs-codegraph-routing.mdc` 已存在
+
+按"先读后合并"原则，**不要直接覆盖**。读取已有文件内容，识别其中是否已有"路由决策表"和"codegraph 当前状态"两节：
+
+- 路由决策表存在 → 跳过该节（用户可能已自定义）
+- 路由决策表不存在 → 在文件末尾追加
+- "codegraph 当前状态"节 → 始终用本次 `CODEGRAPH_STATUS` 覆盖（这是动态信息）
+
+---
+
+## 产物 7：初始化记忆维护基线
 
 四件产物全部就位后，**立即执行一次**：
 
@@ -820,22 +1056,36 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 
 ## 收尾
 
-五件事全部就位后，向用户输出一段简短摘要：
+七件事全部就位后，向用户输出一段简短摘要：
 
 ```text
-项目记忆维护体系部署完成：
+项目记忆维护体系部署完成（v2：与 codegraph 分工配合）：
 - 选定 preset: <name>
 - .cursor/agents/project-memory-maintainer.md
 - .cursor/hooks/memory-precheck.mjs
 - .cursor/hooks.json (stop + sessionEnd 已注册)
 - .memory/记忆索引.md / 项目总览.md / 术语表.md / 待确认问题.md
 - .memory/.hook-state.json （已用当前工作区初始化为基线）
+- .memory/.codegraph-status.json （codegraph 当前状态：<CODEGRAPH_STATUS>）
+- .cursor/rules/05-memory-vs-codegraph-routing.mdc （分工路由：业务→.memory、结构→codegraph）
 
-触发节奏（默认值）：
+分工说明（v2 新增）：
+- .memory 专注业务领域：术语、模块语义、跨模块协作契约、设计决策、红线、已知风险
+- codegraph 专注代码结构：符号位置、调用链、影响半径
+- 子 Agent 维护 .memory 时不调用 codegraph 工具，保证调用次数最少 + codegraph 不可用时仍能完整运行
+
+codegraph 当前状态：<CODEGRAPH_STATUS>
+  ready / init_done    → 已就绪，AI 会按 rules 自动分工路由
+  install_failed       → npm i -g 失败（错误：<error>），rules 已写入降级提示
+  init_failed          → codegraph init -i 失败（错误：<error>），rules 已写入降级提示
+  no_node              → 缺少 Node 工具链，rules 已写入降级提示
+
+触发节奏（默认值，与 v1 一致）：
 - 自上次维护以来变更文件数 ≥ 5 个，或变更行数 ≥ 200 行，或触及核心配置 / 架构敏感区
 - 同一段冷却期内（默认 30 分钟）只提示一次
 - 工作区指纹未变就跳过（即使过了冷却时间）
 - 想调阈值或冷却时间，改 memory-precheck.mjs 顶部 CONFIG 即可
+（v2 不动阈值——通过"模块档案最低质量门"v2 让"什么值得记"更严，由内容定义本身降低维护频率）
 
 日常运维命令：
 - node .cursor/hooks/memory-precheck.mjs --mark-done   维护完成或判 no-op 后调用，刷新基线
@@ -844,16 +1094,29 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 - node .cursor/hooks/memory-precheck.mjs --reset       清空 hook 状态，下次按首次触发处理
 - node .cursor/hooks/memory-precheck.mjs --lint-memory 扫描 .memory 中未标注历史语境的旧路径
 
+codegraph 相关运维（仅在 CODEGRAPH_STATUS == ready / init_done 时可用）：
+- codegraph status          查看索引健康度与统计
+- codegraph sync             手动同步索引（一般不需要，watcher 会自动同步）
+- 详细工具表见 codegraph 自带的 .cursor/rules/codegraph.mdc
+
 接下来：
 - 你下一次较大代码变更结束时，hook 会自动检测并提示主 Agent 调用子代理。
-- 子 Agent 第一次跑会按项目代码自动生成业务模块目录，请审阅它的产物。
-- 建议把 .memory/ 加入 git；.memory/.hook-state.json 已加入 .gitignore。
+- 子 Agent 第一次跑会按项目代码自动生成业务模块目录，按 v2 字段规范（必填：模块职责 / 术语 / 跨模块协作契约 / 设计决策 / 红线）。
+- 建议把 .memory/ 加入 git；.memory/.hook-state.json 和 .memory/.codegraph-status.json 已加入 .gitignore。
 ```
 
-如果项目里没有 `.cursor/rules/**`，最后追加一行提示：
+根据情况，最后追加补充提示：
+
+- 如果项目里没有 `.cursor/rules/**`（除了本次生成的 `05-memory-vs-codegraph-routing.mdc` 之外）：
 
 ```text
 - 检测到本项目尚未生成架构规则，建议运行 /init-architecture-rules。
+```
+
+- 如果 `CODEGRAPH_STATUS` 为 `install_failed` / `init_failed` / `no_node`：
+
+```text
+- codegraph 当前不可用，rules 已自动写入降级提示。修复后请删除 .memory/.codegraph-status.json 并重新运行本命令以重写 rules 中的"codegraph 当前状态"块。
 ```
 
 不要输出代码 diff、不要输出 changelog 风格的"本次修改"——这次部署是一次性安装，不是日常变更。
