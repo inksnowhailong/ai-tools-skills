@@ -1,6 +1,6 @@
 ---
 name: tvs-mind-seed
-description: 为单个 agent 一次性初始化私有记忆系统（profile / personality / active / index / sources / consolidated / raw 七件套）。通过对话引导收集角色定位、关注点、沟通风格、边界，生成 JSON 写入。chat 崩溃后再开同一个 chat 可读回。适用于：tvs-team-spawn 部署完团队后每个成员的记忆初始化，或为独立 chat 建立可恢复的记忆体系。
+description: 为单个 agent 一次性初始化私有记忆系统（精简三件套 identity / memory-active / memory-raw；identity 合并了旧 profile+personality）。通过对话引导收集角色定位、关注点、沟通风格、边界，生成 JSON 写入。chat 崩溃后再开同一个 chat 可读回。适用于：tvs-team-spawn 部署完团队后每个成员的记忆初始化，或为独立 chat 建立可恢复的记忆体系。
 ---
 
 # tvs-mind-seed：单 Agent 记忆初始化
@@ -25,10 +25,10 @@ description: 为单个 agent 一次性初始化私有记忆系统（profile / pe
 
 会做的事：
 
-- 检查 `.cursor/.team/memory/<agent>/` 是否已存在
+- 检查 `.cursor/.team/memory/<agent>/` 是否已存在（claude target 下为 `.claude/.team/...`）
 - 通过 4-6 轮对话收集这个 agent 的角色定位、关注点、沟通风格、边界
-- 把对话结果拼成 JSON 写入 profile / personality / memory-active
-- 创建 memory-raw.md / memory-consolidated.md / memory-index.jsonl / memory-sources.jsonl 骨架
+- 把对话结果拼成 JSON 写入 identity（身份画像，合并了旧 profile+personality）+ memory-active（硬约束）
+- 创建 memory-raw.md 骨架（index/sources/consolidated 懒创建，不预先铺空文件）
 
 不会做的事：
 
@@ -40,10 +40,12 @@ description: 为单个 agent 一次性初始化私有记忆系统（profile / pe
 ## 运行时命令
 
 ```text
-node "<skill-path>/scripts/memory.mjs" <command> [args...] [--flag value]
+node "<skill-path>/scripts/memory.mjs" <command> <workspace> <agent> [--flag value]
 ```
 
-`<skill-path>` 通过 Cursor 提供的 skill 路径动态解析，不要硬编码。
+`<skill-path>` 用你所在 IDE 提供的 skill 路径动态解析，不要硬编码。
+
+**目标 IDE（target）**：记忆必须落在和团队一致的目录（cursor→`.cursor/.team`、claude→`.claude/.team`），否则团队 skill 读不到。runtime 会自动探测已部署的 `.team/` 目录——**团队场景无需传 target**。仅当为「无团队的独立 chat」首次建记忆、且你运行在 Claude Code 时，给命令加 `--target claude`（否则默认 cursor）。下文 `.cursor/.team/...` 路径在 claude target 下都对应 `.claude/.team/...`。
 
 ## 执行流程
 
@@ -57,7 +59,7 @@ node "<skill-path>/scripts/memory.mjs" <command> [args...] [--flag value]
 node "<skill-path>/scripts/memory.mjs" list-agents "<workspace>"
 ```
 
-输出会包含已建过 profile/personality/active 的 agent 名。
+输出会包含已建过 identity/active（或旧 profile/personality）的 agent 名。
 
 如果项目根本没团队配置，提示用户：「你可以现在就给这个 chat 起一个 agent 名（例如 leader / planner / researcher / 个人助理），后面就用这个名字。」
 
@@ -151,63 +153,41 @@ node "<skill-path>/scripts/memory.mjs" check "<workspace>" "<agent>"
 node "<skill-path>/scripts/memory.mjs" ensure-root "<workspace>" "<agent>"
 ```
 
-会建立 memory-raw.md、memory-consolidated.md、memory-index.jsonl、memory-sources.jsonl（已有则跳过）。
+会建立 memory-raw.md 骨架（已有则跳过）。index / sources / consolidated 改为懒创建，不在此预建空文件。
 
-#### 3.2 写 profile.json
+#### 3.2 写 identity.json（合并了旧 profile + personality）
 
-把访谈结果拼成 JSON：
+把访谈结果拼成一个 JSON（身份画像，启动时只读它 + memory-active 两个文件即可恢复）：
 
 ```json
 {
-    "codename": "可选，用户给的昵称或保持 null",
+    "codename": "可选昵称或 null",
     "role": "<roleId 或 null>",
     "roleDisplayName": "<roleDisplayName 或 null>",
-    "positioning": "<阶段1.1 收集的一句话定位>",
+    "positioning": "<一句话角色定位>",
     "focus": ["<3-5 条关注点>"],
     "outOfScope": ["<2-4 条不该做>"],
     "communicationStyle": "<concise|detailed|technical|warm|sharp|custom>",
-    "communicationStyleNote": "<custom 时用户的原话；否则可省略>",
+    "communicationStyleNote": "<custom 时用户原话，否则可省略>",
+    "tone": "<沟通基调的自然语言描述>",
+    "traits": ["<2-4 个性格特征，用户提到才写；否则空数组>"],
+    "catchphrase": "<口头禅或 null>",
+    "quirks": "<小癖好或 null>",
     "boundaries": ["<明确的硬边界>"],
+    "roleSeed": "<sub 时填 role.systemPrompt，否则 null>",
     "notes": "<其他用户主动说的画像信息，否则空字符串>"
 }
 ```
 
-**推荐用法**：先用 Write 工具把 JSON 写到临时文件，再用 `--profile-file` 传，避免 PowerShell / 各种 shell 的引号坑：
+**推荐 file 模式**（先用 Write 工具把 JSON 写到临时文件，避免 PowerShell / 各种 shell 引号坑）：
 
 ```bash
-node "<skill-path>/scripts/memory.mjs" write-profile "<workspace>" "<agent>" --profile-file <tmpPath>
+node "<skill-path>/scripts/memory.mjs" write-identity "<workspace>" "<agent>" --identity-file <tmpPath>
 ```
 
-退化方案（仅在 JSON 简单且无嵌套引号时）：
+退化方案（JSON 简单无嵌套引号时）：`--identity '<上面的 JSON 字符串>'`。两种输入都 BOM-tolerant 解析，不用担心 PowerShell 默认带 BOM。
 
-```bash
-node "<skill-path>/scripts/memory.mjs" write-profile "<workspace>" "<agent>" --profile '<上面的 JSON 字符串>'
-```
-
-支持的两种输入都会被 BOM-tolerant 地解析，不用担心 PowerShell `Set-Content -Encoding UTF8` 默认带 BOM 的问题。
-
-#### 3.3 写 personality.json
-
-```json
-{
-    "name": "<codename 或 agent 名>",
-    "traits": ["<2-4 个性格特征，用户提到才写；没提到就空数组>"],
-    "tone": "<沟通风格的自然语言描述>",
-    "kaomojiPreference": [],
-    "catchphrase": "<用户给的口头禅或 null>",
-    "quirks": "<用户给的小癖好或 null>",
-    "boundaries": "<personality 层的边界，与 profile.boundaries 互补>",
-    "roleSeed": "<sub 时填 role.systemPrompt，否则 null>"
-}
-```
-
-调用（推荐 file 模式）：
-
-```bash
-node "<skill-path>/scripts/memory.mjs" write-personality "<workspace>" "<agent>" --personality-file <tmpPath>
-```
-
-#### 3.4 写 memory-active.json
+#### 3.3 写 memory-active.json
 
 把"必须立刻生效"的硬约束写进去：
 
@@ -221,7 +201,8 @@ node "<skill-path>/scripts/memory.mjs" write-personality "<workspace>" "<agent>"
     "recentDecisions": [],
     "memoryHints": [
         "<sub 时填 role.memoryHints；leader/standalone 时为空或填用户特别指定的>"
-    ]
+    ],
+    "lastSeenBlackboardHashes": {}
 }
 ```
 
@@ -238,12 +219,10 @@ node "<skill-path>/scripts/memory.mjs" write-active "<workspace>" "<agent>" --ac
 ```text
 <agent> 的私有记忆已经就位：
 
-- profile.json         角色定位、关注点、风格
-- personality.json     人设与沟通基调
-- memory-active.json   当前硬约束（agent 启动时会优先读取）
+- identity.json        身份画像：定位/关注/边界/人设/风格（首次进入 / 崩溃恢复时读）
+- memory-active.json   当前硬约束 + lastSeenBlackboardHashes（每轮唤醒都读，很小）
 - memory-raw.md        候选记忆池（agent 工作中按需追加）
-- memory-consolidated.md  长期摘要（暂为空骨架，后续整理生成）
-- memory-index.jsonl / memory-sources.jsonl  索引与证据（暂空）
+- （index / sources / consolidated 懒创建，当前无自动整理流程，先不建）
 
 下次这个 chat 启动时（或者它崩溃后再开），
 对应的 skill 会自动检测到这些文件，把硬约束注入工作上下文。
@@ -254,25 +233,22 @@ node "<skill-path>/scripts/memory.mjs" write-active "<workspace>" "<agent>" --ac
 
 退出，不主动启动下一步动作。
 
-## 七件套设计要点（写给你，不给用户讲）
+## 三件套设计要点（写给你，不给用户讲）
 
-这个记忆体系沿用 thoughts 模式中的 HMO-lite，但**去掉了 mind-state**（mind-state 是思绪模式特有的"当前情绪 + 候选队列 + 思考线程"工作区，对普通工作 agent 用不到）：
+精简自 thoughts 的 HMO-lite（去掉 mind-state），再把静态的 profile + personality 合并成 identity，默认只留三件套；index/sources/consolidated 改懒创建（当前无自动整理流程，不预先铺空文件）：
 
-| 文件 | 角色 | 谁写 | 优先级 |
+| 文件 | 角色 | 谁写 | 何时读 |
 |---|---|---|---|
-| profile.json | 静态画像：定位、关注、边界 | tvs-mind-seed 一次性写，agent 偶尔更新 | 启动时必读 |
-| personality.json | 沟通风格、人设、口头禅 | tvs-mind-seed 一次性写 | 启动时必读 |
-| memory-active.json | 当前最该影响行为的活跃约束 | agent 工作中按需更新 | 启动时必读 |
-| memory-index.jsonl | 长期记忆索引，每条带元数据 | 整理流程或用户手动 | 按需查询 |
-| memory-sources.jsonl | 原文证据，防止总结漂移 | 同上 | 按需溯源 |
-| memory-consolidated.md | 人类可读长期摘要 | 整理流程生成 | 偶尔通读 |
+| identity.json | 静态身份画像：定位、关注、边界、人设、沟通风格（合并了旧 profile+personality） | tvs-mind-seed 一次性写，偶尔更新 | **仅首次进入 / 崩溃恢复读一次** |
+| memory-active.json | 当前活跃约束 + ongoingTasks + lastSeenBlackboardHashes | agent 工作中按需更新 | **每轮唤醒都读（很小）** |
 | memory-raw.md | 候选记忆池，待整理 | agent 工作中追加 | 整理时输入 |
+| （懒创建）index / sources / consolidated | 长期索引 / 证据 / 摘要 | 未来的整理流程 | 有了再说 |
 
-启动时 agent 默认只摄入 profile + personality + memory-active；剩下的按需查询。这样上下文不会被全量历史撑爆。
+关键省 token 原则：**identity 静态、只读一次；每轮唤醒只摄入小小的 memory-active + 黑板的变更门控索引**，绝不每轮重摄入全量画像和黑板全文。兼容旧七件套部署（identity 不存在时回退 profile + personality）。
 
 ## 不要做的事
 
-- **不要把访谈记录全部写进 memory**。只把已确认的、稳定的信息写入 profile / personality / active。访谈过程本身丢弃。
+- **不要把访谈记录全部写进 memory**。只把已确认的、稳定的信息写入 identity / active。访谈过程本身丢弃。
 - **不要给 agent 编故事**。用户没说的不要替他补"喜欢咖啡"、"摩羯座"这种乱七八糟的设定。
 - **不要碰其他 agent 的 memory 目录**。这次调用只服务一个 agent。
 - **不要在 hardConstraints 里写软约束**。"建议"、"尽量"、"通常"都不是硬约束。硬约束 = 越线即错。

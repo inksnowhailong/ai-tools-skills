@@ -1,7 +1,19 @@
 {
     "schemaVersion": 1,
-    "updatedAt": "2026-05-21",
-    "note": "tvs-team-spawn 可选角色池。19 个核心角色合并自 oh-my-claudecode REFERENCE.md，已去掉 low/medium/high tier 差异，model 在生成 sub skill 时根据 defaultModel 写入 frontmatter，用户可手动调整。",
+    "updatedAt": "2026-05-29",
+    "note": "tvs-team-spawn 可选角色池。模型按 target 解析：tier 优先用角色显式 'tier' 字段，否则从 defaultModel 反推(deep/fast)，再查 modelsByTarget[target][tier]。三档：deep=重推理(架构/审查)、fast=常规实现、cheap=只读探索。想进一步降本可给更多角色加 'tier':'cheap'（如 writer/qa-tester）。cursor 的 cheap 暂等同 fast(sonnet) 以保留原行为，可自行换成 cursor 的 haiku 档。",
+    "modelsByTarget": {
+        "cursor": {
+            "deep": "claude-opus-4-7-thinking-max",
+            "fast": "claude-4.6-sonnet-high-thinking",
+            "cheap": "claude-4.6-sonnet-high-thinking"
+        },
+        "claude": {
+            "deep": "claude-opus-4-8",
+            "fast": "claude-sonnet-4-6",
+            "cheap": "claude-haiku-4-5-20251001"
+        }
+    },
     "roles": [
         {
             "id": "architect",
@@ -31,6 +43,7 @@
         },
         {
             "id": "explore",
+            "tier": "cheap",
             "displayName": "代码勘察",
             "summary": "快速定位文件、符号、调用链，回答“在哪里、怎么实现的、谁在用”。",
             "defaultModel": "claude-4.6-sonnet-high-thinking",
@@ -44,6 +57,7 @@
         },
         {
             "id": "document-specialist",
+            "tier": "cheap",
             "displayName": "文档研究员",
             "summary": "通读项目内已有文档、注释、API 参考，整理可信结论。",
             "defaultModel": "claude-4.6-sonnet-high-thinking",
@@ -83,6 +97,7 @@
         },
         {
             "id": "vision",
+            "tier": "cheap",
             "displayName": "视觉理解",
             "summary": "解读截图、设计稿、图表、流程图、错误界面截图。",
             "defaultModel": "claude-4.6-sonnet-high-thinking",

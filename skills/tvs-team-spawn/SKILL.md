@@ -32,11 +32,11 @@ description: 一次性为当前项目构建多 Agent 团队协作系统。通过
 开始前先检查这三点，缺失就先问用户：
 
 1. 当前项目是不是 git 仓库？worktree 功能依赖 git。
-2. `.cursor/.team/config.json` 是不是已经存在？存在 = 之前已部署过；读出来给用户看，问要不要：
+2. 团队配置（`.cursor/.team/config.json` 或 `.claude/.team/config.json`，按 target）是不是已经存在？存在 = 之前已部署过；读出来给用户看，问要不要：
     - 添加新成员（add-member）
     - 重新生成 leader/sub skill（generate-leader/sub）
     - 重新写 stop hook（generate-stop-hook）
-    - 全部清空重来（删除 `.cursor/.team/` 后从头）
+    - 全部清空重来（删除对应 target 的 `.team/` 目录后从头）
 3. 用户最近一次给当前 chat 发过消息吗？bind 命令通过扫 transcripts 拿当前 conversation_id，必须先有过对话才能 bind；不过 bind 是用户进 leader chat 后才做的事，本 skill 不调用 bind。
 
 如果前置检查不通过，**先把问题告诉用户再继续**，不要硬上。
@@ -49,7 +49,29 @@ description: 一次性为当前项目构建多 Agent 团队协作系统。通过
 node "<skill-path>/scripts/team.mjs" <command> [args...]
 ```
 
-`<skill-path>` 是本 skill 的绝对路径，通常是 `<repo>/AIConfig/skills/tvs-team-spawn`，请使用 Cursor 提供的 skill 路径动态解析，不要硬编码。
+`<skill-path>` 是本 skill 的绝对路径，通常是 `<repo>/AIConfig/skills/tvs-team-spawn`，请用你所在 IDE 提供的 skill 路径动态解析，不要硬编码。
+
+## 目标 IDE（target）
+
+本 runtime 同时支持 **Cursor** 与 **Claude Code**，二者的 hook 协议、skill 落盘位置、会话识别机制完全不同，靠 `--target cursor|claude` 分流。两者的运行时内核（邮箱 / 黑板 / worktree）完全共用。
+
+判定规则（开始执行前先定下来）：
+
+- **你（执行本 skill 的 agent）清楚自己跑在哪个 IDE**：Claude Code → `--target claude`；Cursor → `--target cursor`。不确定就直接问用户。
+- `--target` **只需在 `ensure-team` 时传一次**，会持久化进 `config.json`。之后所有命令会自动探测已部署的 `.team/` 目录推断 target，不必每条都带（带上也无妨，更稳妥）。
+- 缺省（既没传也探测不到）回退 `cursor`，保证老部署零影响。
+
+各 target 的落盘差异：
+
+| | Cursor | Claude Code |
+|---|---|---|
+| 运行时根目录 | `.cursor/.team/` | `.claude/.team/` |
+| skill 落盘 | `.cursor/skills/` | `.claude/skills/` |
+| hook 配置 | `.cursor/hooks.json` | `.claude/settings.json`（`hooks.Stop[]`） |
+| stop driver | `.cursor/hooks/team-stop-driver.mjs` | `.claude/hooks/team-stop-driver.mjs` |
+| 唤醒模型 | 后台 Shell + `block_until_ms: 0` | Bash 工具 `run_in_background: true` |
+
+下文阶段里凡出现 `.cursor/...` 路径，都表示「当前 target 对应的目录」，Claude Code 下自动换成 `.claude/...`。
 
 ## 执行流程
 
@@ -90,6 +112,44 @@ node "<skill-path>/scripts/team.mjs" install-deps
 它会调用 `npm install -g chokidar`。这个动作是**全局一次性的**，所有项目都受益，所有 chat 都不会再被问第二次。
 
 如果用户拒绝 / 没装好 / 网络问题，不要让流程卡在这；继续阶段 1，runtime 在 watcher 启动时会自动 fallback 到 fs.watch。
+
+### 阶段 0.5 — codegraph 供给（结构知识层，团队共享）
+
+团队里的勘察 / 架构 / 审查类角色（explore、architect、code-reviewer、tracer 等）大量需要"X 在哪定义、谁调用、改了影响谁"这类**结构事实**。交给 codegraph（AST 知识图谱）比让 agent 反复 grep 更省 token、也更准。团队初始化时一次性备好，所有 sub chat 都受益。
+
+三层分工：**codegraph** 答代码结构（机器写、秒级新鲜）；**.memory** 答业务领域知识；**黑板** 放本团队协调态。互补不重叠。
+
+#### 0.5.1 检测 codegraph 状态
+
+按顺序探测，记入 `CODEGRAPH_STATE`：
+
+- `node --version` / `npm --version` —— Node 工具链是否可用。
+- `codegraph --version`（或 `where codegraph` / `which codegraph`）—— CLI 是否已装。
+- 是否存在 `.codegraph/`（含 `codegraph.db`）—— 当前项目是否已建索引。
+
+判定：
+
+- `ready`：CLI 已装 + 索引已存在 → 跳过本阶段。
+- `cli_only`：CLI 已装但无索引 → 只跑 `codegraph init -i`。
+- `missing`：CLI 未装但 Node 可用 → 走官方安装器完整链。
+- `no_node`：Node/npm 不可用 → 跳过，并在收尾摘要标注"缺 Node 工具链，codegraph 未装"。
+
+#### 0.5.2 缺失则安装（征得用户同意）
+
+把检测结果给用户，缺失时问是否现在装：
+
+```bash
+# CLI 缺失：官方安装器会自动识别当前工具并写好 MCP 配置 + 用法指南
+npx @colbymchenry/codegraph
+# CLI 已装但没索引（或刚装完）：为当前项目建索引
+codegraph init -i
+```
+
+注意：
+
+- codegraph 的 MCP 配置与"怎么用 codegraph 工具"的指南由**官方安装器**写（claude → `CLAUDE.md` / cursor → `.cursor/rules/codegraph.mdc`），本 skill 不自写、不重复。
+- `.codegraph/`（本地索引 / 日志 / pid）是机器本地状态，应入 `.gitignore`（阶段 5 一并处理），不提交。
+- 用户拒绝 / 网络问题 → 不卡流程，继续阶段 1；团队仍能跑，结构类查询只是退化为 grep。
 
 ### 阶段 1 — 用户访谈
 
@@ -176,14 +236,14 @@ node "<skill-path>/scripts/team.mjs" list-roles
 #### 4.1 初始化团队目录
 
 ```bash
-node "<skill-path>/scripts/team.mjs" ensure-team "<workspace>" --team-name "<teamName>" --leader-name leader
+node "<skill-path>/scripts/team.mjs" ensure-team --workspace "<workspace>" --team-name "<teamName>" --leader-name leader --target <cursor|claude>
 ```
 
 会建立：
 
 ```text
-.cursor/.team/
-├── config.json              团队配置（teamName/subs/blackboard/bindings）
+.cursor/.team/                （claude target 下为 .claude/.team/）
+├── config.json              团队配置（target/teamName/subs/blackboard/bindings）
 ├── inbox/
 │   └── leader/              leader 的收件箱根目录
 ├── blackboard/
@@ -201,7 +261,7 @@ node "<skill-path>/scripts/team.mjs" ensure-team "<workspace>" --team-name "<tea
 每个 sub 都跑一次：
 
 ```bash
-node "<skill-path>/scripts/team.mjs" add-member "<workspace>" <subName> <roleId>
+node "<skill-path>/scripts/team.mjs" add-member --workspace "<workspace>" <subName> <roleId>
 ```
 
 可选传 `--model <modelName>` 覆盖默认 model。
@@ -215,7 +275,7 @@ node "<skill-path>/scripts/team.mjs" add-member "<workspace>" <subName> <roleId>
 #### 4.3 生成 leader skill
 
 ```bash
-node "<skill-path>/scripts/team.mjs" generate-leader "<workspace>"
+node "<skill-path>/scripts/team.mjs" generate-leader --workspace "<workspace>"
 ```
 
 会写入 `.cursor/skills/team-leader-<teamName>/SKILL.md`，里面已经把：
@@ -237,7 +297,7 @@ node "<skill-path>/scripts/team.mjs" generate-leader "<workspace>"
 每个 sub 都跑一次：
 
 ```bash
-node "<skill-path>/scripts/team.mjs" generate-sub "<workspace>" <subName>
+node "<skill-path>/scripts/team.mjs" generate-sub --workspace "<workspace>" <subName>
 ```
 
 会写入 `.cursor/skills/<subName>/SKILL.md`，里面已经把：
@@ -256,26 +316,38 @@ node "<skill-path>/scripts/team.mjs" generate-sub "<workspace>" <subName>
 #### 4.5 写 stop hook 并合并 hooks.json
 
 ```bash
-node "<skill-path>/scripts/team.mjs" generate-stop-hook "<workspace>"
+node "<skill-path>/scripts/team.mjs" generate-stop-hook --workspace "<workspace>"
 ```
 
-会做两件事：
+会做两件事（按 target 自动选对的协议，无需你区分）：
 
-- 写 `.cursor/hooks/team-stop-driver.mjs`：每次 stop 时检查当前 chat 对应的 agent 有没有积压消息；有就 followup_message 让 chat 处理，没就让 chat 启动后台 mailbox-watch 进入待命。
-- 合并到 `.cursor/hooks.json` 的 `hooks.stop[]` 数组里。如果该项目已有其他 stop hook（例如 init-memory-system 装的 memory-precheck），不会覆盖，只追加自己这一条。
+- 写 stop driver 脚本：每次 stop 时检查当前 chat 对应的 agent 有没有积压消息；有就让 chat 处理，没就让 chat 启动后台 mailbox-watch 进入待命。
+  - cursor → `.cursor/hooks/team-stop-driver.mjs`（输出 `followup_message`）
+  - claude → `.claude/hooks/team-stop-driver.mjs`（输出 `{ decision: "block", reason }`，并用 watcher PID 存活检测防 stop 死循环——Claude Code 没有 Cursor 的 `loop_limit`）
+- 合并 hook 注册，已有其它 stop hook 时只追加不覆盖：
+  - cursor → 合并进 `.cursor/hooks.json` 的 `hooks.stop[]`
+  - claude → 合并进 `.claude/settings.json` 的 `hooks.Stop[]`（保留 permissions/env 等其它配置原样）
 
 ### 阶段 5 — 更新 .gitignore
 
-`.cursor/.team/` 里都是运行时状态（邮箱内容、watcher pid、记忆），不应入库。把这两行写入项目根的 `.gitignore`（如果已存在则跳过）：
+`.team/` 里都是运行时状态（邮箱内容、watcher pid、记忆），不应入库。按 target 把对应两行写入项目根的 `.gitignore`（如果已存在则跳过）：
 
 ```text
+# cursor target
 .cursor/.team/
 .cursor/hooks/team-stop-driver.mjs
+
+# claude target
+.claude/.team/
+.claude/hooks/team-stop-driver.mjs
+
+# codegraph 本地索引（机器本地状态，与 target 无关）
+.codegraph/
 ```
 
-`team-stop-driver.mjs` 是生成产物，跟随 hooks.json 即可（hooks.json 可以入库让团队共享 hook 注册，stop-driver 内容由本 skill 在新机器上重新生成）。
+`team-stop-driver.mjs` 是生成产物，跟随 hook 注册文件即可（`.cursor/hooks.json` / `.claude/settings.json` 可入库让团队共享 hook 注册，stop-driver 内容由本 skill 在新机器上重新生成）。
 
-如果你判断用户希望把 stop-driver 也提交（团队共享），不要写进 .gitignore，只忽略 `.cursor/.team/`。
+如果你判断用户希望把 stop-driver 也提交（团队共享），不要写进 .gitignore，只忽略 `.team/` 那一行。
 
 ### 阶段 6 — 引导后续手动步骤
 
@@ -384,14 +456,18 @@ stop hook 唤醒模型：
 ```text
 stop hook 触发
    ↓
-检查 .cursor/.team/config.json 的 bindings → 当前 chat 对应哪个 agent
+检查 .team/config.json 的 bindings → 当前 chat 对应哪个 agent
    ↓
 扫 inbox/<agent>/from-*/ 看有没有新消息
-   ├── 有 → followup_message 让 chat 调用 mailbox-consume 处理
-   └── 没 → followup_message 让 chat 启 mailbox-watch（block_until_ms: 0）进入待命
+   ├── 有 → 注入消息让 chat 调用 mailbox-consume 处理
+   └── 没 → 注入消息让 chat 启 mailbox-watch 进入待命
 ```
 
-watcher 进程在 inbox 有变化或 30 分钟超时时退出，Cursor 把进程结束当作"任务完成通知"再次叫醒 chat。这是把 shell + hook 拼成"event-driven 唤醒"的关键。
+注入消息的协议按 target 不同：
+- cursor → 输出 `{ followup_message }`，watcher 用后台 Shell + `block_until_ms: 0` 启动；靠 `hooks.json` 的 `loop_limit:1` 防重触发。
+- claude → 输出 `{ decision: "block", reason }`，watcher 用 Bash 工具 `run_in_background: true` 启动；Claude Code 没有 `loop_limit`，改靠 stop driver 检测 watcher PID 是否存活（活着就放行 idle）防死循环。
+
+watcher 进程在 inbox 有变化或 60 分钟超时时退出，IDE 把进程结束当作"任务完成通知"再次叫醒 chat。这是把 shell + hook 拼成"event-driven 唤醒"的关键。空闲心跳超时拉长到 60 分钟是为减少空转时的上下文重摄入。
 
 ## 收尾
 

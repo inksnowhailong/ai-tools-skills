@@ -40,7 +40,8 @@ node "{{scriptDir}}/team.mjs" <cmd> ...
 - `bind {{leaderName}}` — 绑定当前 chat 为 leader（首次进入时调用一次）
 - `mailbox-consume {{leaderName}}` — 一次性读出并删除所有寄给 leader 的回执
 - `mailbox-send {{leaderName}} <subName> <payloadJson>` — 派任务给 sub
-- `blackboard-read [section]` — 读黑板
+- `blackboard-status` — 读黑板轻量索引（各 section 的 hash+首行摘要，做变更门控用）
+- `blackboard-read [section]` — 读黑板某一节全文
 - `blackboard-write <section> <markdown> --caller {{leaderName}}` — 写黑板
 - `worktree-create <subName> <branch>` — 建 worktree
 - `worktree-assign <subName> <path>` — 把已有路径分配给 sub
@@ -61,14 +62,14 @@ node "{{scriptDir}}/team.mjs" bind {{leaderName}}
 
 这会把当前 conversation_id 写入 config.json 的 bindings 字段。后续 stop hook 据此判断该 chat 是不是 leader。
 
-### 2. 确认记忆体系已就位
+### 2. 确认记忆体系已就位（仅首次进入 / 崩溃恢复时读全套）
 
-读取 `{{teamDir}}/memory/{{leaderName}}/profile.json`：
+读取 `{{teamDir}}/memory/{{leaderName}}/identity.json`（精简记忆三件套之一：身份画像，静态）：
 
-- 存在 → 直接进下一步。
-- 不存在 → 提示用户：「leader 还没有自己的记忆，先在当前 chat 跑 `/tvs-mind-seed {{leaderName}}` 把记忆体系建起来再来找我。」然后停下等用户操作完再继续。
+- 存在 → 读入它 + `memory-active.json`（硬约束），进下一步。
+- 不存在 → 提示用户：「leader 还没有自己的记忆，先在当前 chat 跑 `/tvs-mind-seed {{leaderName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
 
-记忆体系是你跨 chat 崩溃的保险。不要省略。
+**identity 是静态画像，只在首次进入 / 崩溃恢复时读一次**，不要每轮 stop 唤醒都重读（省 token）。兼容旧部署：没有 identity.json 时回退读 profile.json + personality.json。
 
 ### 3. 清理旧 watcher 并消费积压邮件
 
@@ -79,17 +80,21 @@ node "{{scriptDir}}/team.mjs" mailbox-consume {{leaderName}}
 
 如果 mailbox-consume 输出有 messages，先把每条回执读完再决定下一步动作；不要直接派新任务掩盖未处理的回执。
 
-### 4. 读黑板和自己的活跃记忆
+### 4. 黑板：用索引做"变更门控"，不要每轮全量重读
 
-按需读取：
+**不要**每轮把黑板三个文件全文读进来。改用轻量索引 + 按需读：
 
-- `{{teamDir}}/blackboard/shared-context.md` — 当前阶段、目标
-- `{{teamDir}}/blackboard/decisions.jsonl` — 已经做出的决定
-- `{{teamDir}}/blackboard/conventions.md` — 团队约定
-- `{{teamDir}}/memory/{{leaderName}}/memory-active.json` — 你自己的活跃记忆
-- `{{teamDir}}/memory/{{leaderName}}/memory-consolidated.md` — 你的长期摘要
+```
+node "{{scriptDir}}/team.mjs" blackboard-status
+```
 
-只把和当前问题相关的部分摄入上下文，避免每轮都全量加载。
+它只返回每个 section 的 hash + 字节数 + 首行摘要（极小）。把各 hash 和你记在 `memory-active.json` 的 `lastSeenBlackboardHashes` 字段比对：
+
+- hash 没变 → 跳过，不重读（上轮已知内容）。
+- hash 变了**且与当前任务相关** → 才 `blackboard-read <section>` 读那一节。
+- 读完把新 hash 更新回 `memory-active.json` 的 `lastSeenBlackboardHashes`。
+
+`memory-active.json`（硬约束 + ongoingTasks）每轮都读，它很小。这样一次普通唤醒只摄入「小索引 + 偶尔一节变更」，而不是「黑板全文 + 长期摘要」。
 
 ## 主循环行为规范
 
@@ -161,7 +166,11 @@ jsonPayload 必须包含以下字段：
 
 ## Critic 链编排规则
 
-任何会产生代码、文案、设计稿、文档的 sub 任务，**默认必须经过 critic 审查**才能算完成。
+是否走 critic **按改动风险分级**，不再"一刀切全走"，省掉低风险改动的双倍 LLM 调用：
+
+- **必须走**（高风险）：鉴权 / 权限 / 密钥 / 数据访问 / 对外接口契约、跨模块结构性改动、新增依赖、用户明确要求审查。
+- **默认走**（中风险）：一般业务逻辑、有行为变化的代码。
+- **默认跳过**（低风险，直接合并省 token）：文案 / 注释 / 文档 / 配置微调 / 纯重命名 / 格式化；纯分析调研类回执（explore、document-specialist、tracer）；用户明确说"跳过 critic"。
 
 标准链：
 
@@ -174,11 +183,7 @@ leader 写 decisions.jsonl                       leader 把意见整理成新任
 合并产物，结束本链                              重新派给原 coder
 ```
 
-例外（不需要 critic）：
-
-- 纯分析/调研类回执（explore、document-specialist、tracer）。
-- 用户明确说"这次跳过 critic"。
-- 链长度已经超过 4 轮，避免死循环。
+无论哪级，critic 链长度超过 4 轮一律停，避免来回死循环。
 
 不要让 sub 之间直接传话；critic 的输入永远由你组装，并把 coder 的产出附在 `payload.context` 里。
 
@@ -199,6 +204,7 @@ leader 写 decisions.jsonl                       leader 把意见整理成新任
 - 未确认的猜想
 - 单个 sub 的任务结果（这应该体现在 decisions.jsonl 的"我们因此决定了什么"上，而不是结果原文）
 - 用户隐私、密钥、敏感数据
+- **项目级稳定知识**（模块职责、术语、长期工程约定）——这类归 `.memory`（若项目装了 tvs-init-memory-system），代码结构归 codegraph。黑板只放本团队的**协调态**，需要时引用 `.memory`，不要把项目长期知识复制进黑板。
 
 调用方式（**推荐 file 模式**避免引号坑）：
 
@@ -241,9 +247,9 @@ node "{{scriptDir}}/team.mjs" worktree-assign <subName> "<绝对路径>"
 
 你和每个 sub 都有自己的私有记忆目录 `{{teamDir}}/memory/<agent>/`。这是你跨 chat 崩溃后还能"想起以前在做什么"的唯一保险。
 
-写入规则：
+写入规则（精简三件套 identity / active / raw）：
 
-- profile / personality / memory-active 由 tvs-mind-seed 引导式生成。
+- identity.json（身份画像）+ memory-active.json（硬约束 / ongoingTasks / lastSeenBlackboardHashes）由 tvs-mind-seed 引导式生成。
 - memory-raw.md 由你或 sub 在工作中追加候选条目，格式：
 
 ```markdown

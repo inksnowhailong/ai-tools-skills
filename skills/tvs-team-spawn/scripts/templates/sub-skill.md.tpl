@@ -36,7 +36,8 @@ node "{{scriptDir}}/team.mjs" <cmd> ...
 - `bind {{subName}}` — 绑定 chat 为本 sub
 - `mailbox-consume {{subName}}` — 一次性读出并删除所有寄给本 sub 的消息
 - `mailbox-send {{subName}} {{leaderName}} <payloadJson>` — 给 leader 写回执
-- `blackboard-read [section]` — 读黑板
+- `blackboard-status` — 读黑板轻量索引（hash+首行摘要，变更门控用）
+- `blackboard-read [section]` — 读黑板某一节全文
 - `watcher-claim {{subName}}` — 占位 watcher PID
 
 注意：
@@ -54,12 +55,14 @@ node "{{scriptDir}}/team.mjs" <cmd> ...
 node "{{scriptDir}}/team.mjs" bind {{subName}}
 ```
 
-### 2. 确认记忆体系已就位
+### 2. 确认记忆体系已就位（仅首次进入 / 崩溃恢复时读全套）
 
-读取 `{{teamDir}}/memory/{{subName}}/profile.json`：
+读取 `{{teamDir}}/memory/{{subName}}/identity.json`（精简记忆三件套之一：身份画像，静态）：
 
-- 存在 → 进下一步。
+- 存在 → 读入它 + `memory-active.json`，进下一步。
 - 不存在 → 提示用户：「我还没有自己的记忆，先在这个 chat 跑 `/tvs-mind-seed {{subName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
+
+**identity 是静态画像，只在首次进入 / 崩溃恢复时读一次**，不要每轮 stop 唤醒都重读。兼容旧部署：没有 identity.json 时回退读 profile.json + personality.json。
 
 ### 3. 清理旧 watcher 并消费积压邮件
 
@@ -70,14 +73,11 @@ node "{{scriptDir}}/team.mjs" mailbox-consume {{subName}}
 
 如果有积压消息，**先处理积压消息再决定本轮做什么**。
 
-### 4. 读自己的活跃记忆
+### 4. 读 memory-active（小，每轮都读）；黑板按需
 
-读取：
+读取 `{{teamDir}}/memory/{{subName}}/memory-active.json`（边界 + 当前任务 + lastSeenBlackboardHashes）——它很小，每轮都读，里面的硬约束你必须遵守。
 
-- `{{teamDir}}/memory/{{subName}}/memory-active.json` — 边界、当前正在干的任务
-- `{{teamDir}}/memory/{{subName}}/memory-consolidated.md` — 长期摘要
-
-memory-active 里写的硬约束你必须遵守。
+黑板**不要每轮全读**：需要团队共识时先 `blackboard-status` 看 hash，只有变了且相关才 `blackboard-read <section>`（见下「黑板使用」）。
 
 ## 主循环行为规范
 
@@ -155,14 +155,16 @@ status 取值含义：
 
 不要瞎写 `done`。critic 和 leader 都会基于 status 决定下一步。
 
-## 黑板使用（只读）
+## 黑板使用（只读 + 变更门控）
 
-需要团队共识时主动读：
+**不要每轮把黑板全读**。先读轻量索引，再按需取变更的那一节（省 token）：
 
 ```bash
+# 1. 看索引：各 section 的 hash + 首行摘要（极小）
+node "{{scriptDir}}/team.mjs" blackboard-status
+# 2. 把 hash 和 memory-active.json 的 lastSeenBlackboardHashes 比对，只有变了且与当前任务相关才读那一节：
 node "{{scriptDir}}/team.mjs" blackboard-read shared-context
-node "{{scriptDir}}/team.mjs" blackboard-read decisions
-node "{{scriptDir}}/team.mjs" blackboard-read conventions
+# 3. 读完把新 hash 更新回 memory-active.json 的 lastSeenBlackboardHashes
 ```
 
 发现黑板里某条规定与你接到的任务冲突时，**不要自作主张**，回执里写明矛盾，让 leader 拍板。

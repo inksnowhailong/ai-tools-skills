@@ -5,14 +5,18 @@
  * 用法：
  *   node team.mjs <command> [args...] [--flag value]
  *
+ * 目标 IDE：--target cursor|claude（仅 ensure-team 需传，持久化进 config.json，
+ * 其余命令自动探测已部署的 .team/ 目录）。下列路径以 cursor 为例，claude target 下
+ * 自动换成 .claude/ 前缀（.claude/.team、.claude/skills、.claude/settings.json）。
+ *
  * 命令列表：
  *   ensure-team         初始化 .cursor/.team/ 目录骨架与 config.json
  *   list-roles          输出可选角色池
  *   add-member          在 config.json 追加成员并建立邮箱/记忆目录
  *   generate-leader     生成 .cursor/skills/team-leader-<team>/SKILL.md
  *   generate-sub        生成 .cursor/skills/<subName>/SKILL.md
- *   generate-stop-hook  写出 .cursor/hooks/team-stop-driver.mjs 并合并 hooks.json
- *   bind                把当前最近的 Cursor conversation_id 绑定到 agent
+ *   generate-stop-hook  写出 stop driver 并合并 hook 注册（hooks.json / settings.json）
+ *   bind                把当前 chat 的 session/conversation id 绑定到 agent
  *   unbind              解绑某个 conversation_id 或 agent
  *   mailbox-send        原子写入一条消息到 inbox/<to>/from-<from>/
  *   mailbox-consume     一次性读出并删除 inbox/<agent>/from-* /*.json
@@ -51,7 +55,7 @@ import { join, dirname, resolve, relative } from 'node:path'
 import { homedir } from 'node:os'
 import { execFileSync, execSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = dirname(__filename)
@@ -80,12 +84,48 @@ function normalizeWorkspace(value) {
     return result
 }
 
+/**
+ * 本次命令的目标 IDE：'cursor' | 'claude'。在 main() 里按 resolveTarget 设定一次，
+ * 之后 teamDirFor / skillsDirFor 等纯路径函数直接读它，避免把 target 穿透到每个签名。
+ */
+let TARGET = 'cursor'
+
+/** IDE 专属相对目录布局的唯一定义处。改路径只动这里。 */
+function ideLayout(target) {
+    return target === 'claude'
+        ? { teamDir: ['.claude', '.team'], skillsDir: ['.claude', 'skills'] }
+        : { teamDir: ['.cursor', '.team'], skillsDir: ['.cursor', 'skills'] }
+}
+
+/** 团队运行时目录的相对形式（写进模板用），默认取当前 TARGET。 */
+function teamDirRel(target = TARGET) {
+    return ideLayout(target).teamDir.join('/')
+}
+
 function teamDirFor(ws) {
-    return join(ws, '.cursor', '.team')
+    return join(ws, ...ideLayout(TARGET).teamDir)
+}
+
+/** IDE 的 skill 落盘根目录：.cursor/skills 或 .claude/skills。 */
+function skillsDirFor(ws) {
+    return join(ws, ...ideLayout(TARGET).skillsDir)
 }
 
 function configFileFor(ws) {
     return join(teamDirFor(ws), 'config.json')
+}
+
+/** 探测已部署的 target：哪个 IDE 的 .team/config.json 存在就是哪个。 */
+function detectTarget(ws) {
+    if (existsSync(join(ws, '.claude', '.team', 'config.json'))) return 'claude'
+    if (existsSync(join(ws, '.cursor', '.team', 'config.json'))) return 'cursor'
+    return null
+}
+
+/** 解析 target：显式 --target 优先，其次探测已部署目录，最后回退 cursor（兼容老部署）。 */
+function resolveTarget(args, ws) {
+    if (args.target === 'claude' || args.target === 'cursor') return args.target
+    return detectTarget(ws) ?? 'cursor'
 }
 
 function toRel(ws, p) {
@@ -204,6 +244,24 @@ function findRole(roleId) {
     return loadRoles().roles.find((r) => r.id === roleId) ?? null
 }
 
+/** 从角色现有的 cursor 模型名反推逻辑档位，避免给 19 个角色逐个加 tier 字段。 */
+const TIER_BY_CURSOR_MODEL = {
+    'claude-opus-4-7-thinking-max': 'deep',
+    'claude-4.6-sonnet-high-thinking': 'fast',
+}
+
+/** 按当前 TARGET + 角色档位解析模型；查不到表时回退角色的 defaultModel（cursor 原值）。 */
+function resolveModelForRole(role) {
+    // 角色显式 tier 优先（如 explore/document-specialist/vision 下放到 cheap），否则从 cursor 默认模型反推
+    const tier = role.tier ?? TIER_BY_CURSOR_MODEL[role.defaultModel] ?? 'fast'
+    return loadRoles().modelsByTarget?.[TARGET]?.[tier] ?? role.defaultModel
+}
+
+/** leader 固定走 deep 档。 */
+function resolveLeaderModel() {
+    return loadRoles().modelsByTarget?.[TARGET]?.deep ?? 'claude-opus-4-7-thinking-max'
+}
+
 /* =========================================================================
  * Cursor session detection
  *
@@ -251,6 +309,46 @@ function latestConversationId(workspace) {
 }
 
 /* =========================================================================
+ * Claude Code session detection
+ *
+ * Claude Code 把 transcript 存在
+ *   ~/.claude/projects/<slug>/<session-id>.jsonl
+ * slug 规则与 Cursor 不同：取 OS 原生路径，把所有非字母数字字符替成 '-'
+ * （例如 E:\shirehub -> E--shirehub）。bind 时取最近修改的 jsonl 文件名作 session_id。
+ * ========================================================================= */
+
+function claudeProjectSlug(workspace) {
+    // workspace 是 normalize 后的正斜杠形式；Windows 下转回反斜杠再 slug 化，与 Claude Code 一致
+    let osPath = workspace
+    if (process.platform === 'win32') osPath = workspace.replaceAll('/', '\\')
+    return osPath.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+function latestClaudeSessionId(workspace) {
+    const root = join(homedir(), '.claude', 'projects', claudeProjectSlug(workspace))
+    if (!existsSync(root)) return null
+    let entries
+    try {
+        entries = readdirSync(root, { withFileTypes: true })
+    } catch {
+        return null
+    }
+    const candidates = []
+    for (const f of entries) {
+        if (!f.isFile()) continue
+        if (!/^[0-9a-f-]{36}\.jsonl$/i.test(f.name)) continue
+        try {
+            const st = statSync(join(root, f.name))
+            candidates.push({ id: f.name.replace(/\.jsonl$/i, ''), mtimeMs: st.mtimeMs })
+        } catch {
+            continue
+        }
+    }
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return candidates[0]?.id ?? null
+}
+
+/* =========================================================================
  * Config helpers
  * ========================================================================= */
 
@@ -280,8 +378,8 @@ function listAllAgents(cfg) {
  * ========================================================================= */
 
 function cmdEnsureTeam(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const teamName = args['team-name'] ?? args.teamName ?? args._[1] ?? `team-${Date.now()}`
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const teamName = args['team-name'] ?? args.teamName ?? args._[0] ?? `team-${Date.now()}`
     const leaderName = args['leader-name'] ?? args.leaderName ?? 'leader'
 
     const teamDir = teamDirFor(ws)
@@ -307,7 +405,7 @@ function cmdEnsureTeam(args) {
     const blackboardFiles = {
         'shared-context.md': '# 团队共享上下文\n\n（由 leader 维护；阶段、目标、核心方向；sub 只读。）\n',
         'decisions.jsonl': '',
-        'conventions.md': '# 团队约定\n\n（命名、风格、不可破坏的边界；由 leader 维护。）\n',
+        'conventions.md': '# 团队约定\n\n（命名、风格、不可破坏的边界；由 leader 维护。）\n\n> 项目级稳定工程约定见 .memory（若装了 tvs-init-memory-system）、代码结构查 codegraph；本黑板只放本团队协调态，不复制项目长期知识。\n',
     }
     for (const [name, body] of Object.entries(blackboardFiles)) {
         const p = join(teamDir, 'blackboard', name)
@@ -322,10 +420,11 @@ function cmdEnsureTeam(args) {
         config = {
             schemaVersion: 1,
             teamName,
+            target: TARGET,
             leaderName,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            leader: { name: leaderName, model: 'claude-opus-4-7-thinking-max' },
+            leader: { name: leaderName, model: resolveLeaderModel() },
             subs: [],
             blackboard: { writers: [leaderName] },
             bindings: {},
@@ -358,9 +457,9 @@ function cmdListRoles() {
 }
 
 function cmdAddMember(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const name = args._[1]
-    const roleId = args._[2]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const name = args._[0]
+    const roleId = args._[1]
     if (!name) throw new Error('add-member: missing <name>')
     if (!roleId) throw new Error('add-member: missing <role>')
 
@@ -371,7 +470,7 @@ function cmdAddMember(args) {
     if (name === config.leaderName) throw new Error(`add-member: name ${name} conflicts with leader`)
     if (config.subs.some((s) => s.name === name)) throw new Error(`add-member: name ${name} already taken`)
 
-    const model = args.model ?? role.defaultModel
+    const model = args.model ?? resolveModelForRole(role)
     const member = {
         name,
         role: roleId,
@@ -392,7 +491,7 @@ function cmdAddMember(args) {
 }
 
 function cmdGenerateLeader(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
     const config = assertConfig(ws, 'generate-leader')
 
     const skillName = args['skill-name'] ?? args.skillName ?? `team-leader-${config.teamName}`
@@ -406,19 +505,19 @@ function cmdGenerateLeader(args) {
         skillName,
         teamName: config.teamName,
         leaderName: config.leaderName,
-        teamDir: '.cursor/.team',
+        teamDir: teamDirRel(),
         scriptDir: SCRIPT_DIR.replaceAll('\\', '/'),
         memberList,
     })
 
-    const skillPath = join(ws, '.cursor', 'skills', skillName, 'SKILL.md')
+    const skillPath = join(skillsDirFor(ws), skillName, 'SKILL.md')
     atomicWriteFile(skillPath, content)
     return { ok: true, skillPath: toRel(ws, skillPath), skillName }
 }
 
 function cmdGenerateSub(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const subName = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const subName = args._[0]
     if (!subName) throw new Error('generate-sub: missing <name>')
 
     const config = assertConfig(ws, 'generate-sub')
@@ -440,21 +539,25 @@ function cmdGenerateSub(args) {
         roleDisplayName: role.displayName,
         roleSummary: role.summary,
         roleSystemPrompt: role.systemPrompt,
-        teamDir: '.cursor/.team',
+        teamDir: teamDirRel(),
         scriptDir: SCRIPT_DIR.replaceAll('\\', '/'),
         memoryHintsBullet,
     })
 
-    const skillPath = join(ws, '.cursor', 'skills', subName, 'SKILL.md')
+    const skillPath = join(skillsDirFor(ws), subName, 'SKILL.md')
     atomicWriteFile(skillPath, content)
     return { ok: true, skillPath: toRel(ws, skillPath), subName, role: role.id }
 }
 
 function cmdGenerateStopHook(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    return TARGET === 'claude' ? generateStopHookClaude(ws) : generateStopHookCursor(ws)
+}
 
+/** Cursor：写 .cursor/hooks/team-stop-driver.mjs + 合并 .cursor/hooks.json 的 hooks.stop[]。 */
+function generateStopHookCursor(ws) {
     const hookPath = join(ws, '.cursor', 'hooks', 'team-stop-driver.mjs')
-    const template = readTemplate('team-stop-driver.mjs.tpl')
+    const template = readTemplate('team-stop-driver.cursor.mjs.tpl')
     atomicWriteFile(hookPath, template)
 
     const hooksJsonPath = join(ws, '.cursor', 'hooks.json')
@@ -481,16 +584,46 @@ function cmdGenerateStopHook(args) {
 
     writeJsonAtomic(hooksJsonPath, hooksConfig)
 
-    return {
-        ok: true,
-        hookPath: toRel(ws, hookPath),
-        hooksJson: toRel(ws, hooksJsonPath),
+    return { ok: true, target: 'cursor', hookPath: toRel(ws, hookPath), hooksJson: toRel(ws, hooksJsonPath) }
+}
+
+/**
+ * Claude Code：写 .claude/hooks/team-stop-driver.mjs + 合并 .claude/settings.json 的 hooks.Stop[]。
+ * settings.json 结构与 Cursor 完全不同（嵌套 matcher / hooks[{type,command}]），
+ * 且可能已有用户的 permissions/env 等其它配置——这里只增量合并自己这条，其余原样保留。
+ */
+function generateStopHookClaude(ws) {
+    const hookPath = join(ws, '.claude', 'hooks', 'team-stop-driver.mjs')
+    atomicWriteFile(hookPath, readTemplate('team-stop-driver.claude.mjs.tpl'))
+
+    // Claude Code 运行 Stop hook 时 cwd 即项目根，用相对路径即可，免去跨平台的环境变量展开差异。
+    const command = 'node .claude/hooks/team-stop-driver.mjs'
+
+    const settingsPath = join(ws, '.claude', 'settings.json')
+    const settings = readJson(settingsPath, null) ?? {}
+    if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
+    if (!Array.isArray(settings.hooks.Stop)) settings.hooks.Stop = []
+
+    // 幂等：已存在同 command 的条目就不重复加
+    const already = settings.hooks.Stop.some(
+        (group) => Array.isArray(group?.hooks) && group.hooks.some((h) => h?.command === command),
+    )
+    if (!already) {
+        settings.hooks.Stop.push({
+            matcher: '',
+            hooks: [{ type: 'command', command, timeout: 10 }],
+        })
     }
+
+    // Claude settings.json 习惯 2 空格缩进
+    atomicWriteFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`)
+
+    return { ok: true, target: 'claude', hookPath: toRel(ws, hookPath), settingsJson: toRel(ws, settingsPath) }
 }
 
 function cmdBind(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const agent = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const agent = args._[0]
     if (!agent) throw new Error('bind: missing <agent>')
 
     const config = assertConfig(ws, 'bind')
@@ -501,12 +634,13 @@ function cmdBind(args) {
         throw new Error(`bind: agent ${agent} not in team`)
     }
 
-    const convId = args['conversation-id'] ?? args.conversationId ?? latestConversationId(ws)
+    const explicitId = args['conversation-id'] ?? args.conversationId ?? args['session-id'] ?? args.sessionId
+    const convId = explicitId ?? (TARGET === 'claude' ? latestClaudeSessionId(ws) : latestConversationId(ws))
     if (!convId) {
         throw new Error(
-            'bind: cannot detect current conversation_id. ' +
+            'bind: cannot detect current session id. ' +
                 'Send at least one message in this chat first, then retry. ' +
-                'Or pass --conversation-id <uuid> explicitly.',
+                'Or pass --session-id <uuid> (Claude) / --conversation-id <uuid> (Cursor) explicitly.',
         )
     }
 
@@ -523,8 +657,8 @@ function cmdBind(args) {
 }
 
 function cmdUnbind(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const target = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const target = args._[0]
     const config = assertConfig(ws, 'unbind')
 
     config.bindings = config.bindings ?? {}
@@ -545,11 +679,11 @@ function cmdUnbind(args) {
 }
 
 function cmdMailboxSend(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const from = args._[1]
-    const to = args._[2]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const from = args._[0]
+    const to = args._[1]
     if (!from || !to) {
-        throw new Error('mailbox-send: usage <workspace> <from> <to> (<jsonPayload> | --payload-file <path>)')
+        throw new Error('mailbox-send: usage <from> <to> (<jsonPayload> | --payload-file <path>) [--workspace <path>]')
     }
 
     // 优先 --payload-file（跨平台稳定，避免 PowerShell/CMD 的引号坑）；
@@ -563,7 +697,7 @@ function cmdMailboxSend(args) {
             throw new Error(`mailbox-send: cannot read --payload-file ${payloadFile}: ${e.message}`)
         }
     } else {
-        payloadStr = args._[3]
+        payloadStr = args._[2]
     }
     if (!payloadStr) {
         throw new Error('mailbox-send: missing payload (provide <jsonPayload> argument or --payload-file <path>)')
@@ -604,8 +738,8 @@ function cmdMailboxSend(args) {
 }
 
 function cmdMailboxConsume(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const agent = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const agent = args._[0]
     if (!agent) throw new Error('mailbox-consume: missing <agent>')
 
     const teamDir = teamDirFor(ws)
@@ -781,11 +915,11 @@ function watchWithFsWatch({ inboxDir, pidFile, maxMs, ws }) {
 }
 
 async function cmdMailboxWatch(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const agent = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const agent = args._[0]
     if (!agent) throw new Error('mailbox-watch: missing <agent>')
 
-    const maxMs = Number.parseInt(args['max-ms'] ?? args.maxMs ?? '1800000', 10)
+    const maxMs = Number.parseInt(args['max-ms'] ?? args.maxMs ?? '3600000', 10)
     const forceMode = args.engine ?? null // 'chokidar' | 'fs.watch' | null
 
     const teamDir = teamDirFor(ws)
@@ -864,8 +998,8 @@ function cmdInstallDeps(args) {
 }
 
 function cmdBlackboardRead(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const section = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const section = args._[0]
 
     const bbDir = join(teamDirFor(ws), 'blackboard')
 
@@ -887,9 +1021,36 @@ function cmdBlackboardRead(args) {
     return { ok: true, content: out }
 }
 
+/**
+ * 黑板索引（轻量）：返回各 section 的 hash + 字节数 + 首行摘要，**不返全文**。
+ * 供 agent 每轮唤醒做"变更门控"——把 hash 和上次记录（存在 memory-active.lastSeenBlackboardHashes）比对，
+ * 只有变了或确实相关时才 blackboard-read 那一节，避免每轮把黑板全文重摄入上下文（省 token）。
+ */
+function cmdBlackboardStatus(args) {
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const bbDir = join(teamDirFor(ws), 'blackboard')
+    const sections = []
+    if (existsSync(bbDir)) {
+        for (const f of readdirSync(bbDir).sort()) {
+            let text = ''
+            try { text = readTextFile(join(bbDir, f)) } catch { continue }
+            // 首行摘要：跳过空行和 markdown 标题，取第一条有实义的内容
+            const head = text.split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#')) ?? ''
+            sections.push({
+                section: f.replace(/\.(md|jsonl)$/, ''),
+                file: f,
+                bytes: Buffer.byteLength(text, 'utf8'),
+                hash: createHash('sha1').update(text).digest('hex').slice(0, 12),
+                head: head.slice(0, 80),
+            })
+        }
+    }
+    return { ok: true, sections }
+}
+
 function cmdBlackboardWrite(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const section = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const section = args._[0]
     const caller = args.caller
 
     if (!section) throw new Error('blackboard-write: missing <section>')
@@ -904,7 +1065,7 @@ function cmdBlackboardWrite(args) {
             throw new Error(`blackboard-write: cannot read --content-file ${contentFile}: ${e.message}`)
         }
     } else {
-        content = args._[2]
+        content = args._[1]
     }
     if (content === undefined) {
         throw new Error('blackboard-write: missing content (provide <content> argument or --content-file <path>)')
@@ -939,9 +1100,9 @@ function cmdBlackboardWrite(args) {
 }
 
 function cmdWorktreeCreate(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const subName = args._[1]
-    const branch = args._[2]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const subName = args._[0]
+    const branch = args._[1]
     if (!subName || !branch) throw new Error('worktree-create: missing <subName> <branch>')
 
     const config = assertConfig(ws, 'worktree-create')
@@ -969,9 +1130,9 @@ function cmdWorktreeCreate(args) {
 }
 
 function cmdWorktreeAssign(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const subName = args._[1]
-    const path = args._[2]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const subName = args._[0]
+    const path = args._[1]
     if (!subName || !path) throw new Error('worktree-assign: missing <subName> <path>')
     if (!existsSync(path)) throw new Error(`worktree-assign: path ${path} does not exist`)
 
@@ -986,7 +1147,7 @@ function cmdWorktreeAssign(args) {
 }
 
 function cmdWorktreeList(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
     const config = assertConfig(ws, 'worktree-list')
 
     let gitOut = ''
@@ -1006,8 +1167,8 @@ function cmdWorktreeList(args) {
 }
 
 function cmdWatcherClaim(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
-    const agent = args._[1]
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const agent = args._[0]
     if (!agent) throw new Error('watcher-claim: missing <agent>')
 
     const teamDir = teamDirFor(ws)
@@ -1026,7 +1187,7 @@ function cmdWatcherClaim(args) {
 }
 
 function cmdStatus(args) {
-    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
     const config = readConfig(ws)
     if (!config) return { ok: false, message: 'team not initialized' }
 
@@ -1065,6 +1226,7 @@ function cmdStatus(args) {
         ok: true,
         status: {
             teamName: config.teamName,
+            target: config.target ?? TARGET,
             teamDir: toRel(ws, teamDir),
             leader: {
                 name: config.leaderName,
@@ -1127,6 +1289,7 @@ const COMMANDS = {
     'mailbox-consume': cmdMailboxConsume,
     'mailbox-watch': cmdMailboxWatch,
     'blackboard-read': cmdBlackboardRead,
+    'blackboard-status': cmdBlackboardStatus,
     'blackboard-write': cmdBlackboardWrite,
     'worktree-create': cmdWorktreeCreate,
     'worktree-assign': cmdWorktreeAssign,
@@ -1156,6 +1319,8 @@ async function main() {
         process.exit(2)
     }
     const args = parseArgs(argv.slice(1))
+    // target 在分发前解析一次：显式 --target 优先，否则探测已部署目录，回退 cursor
+    TARGET = resolveTarget(args, normalizeWorkspace(args.workspace ?? process.cwd()))
     try {
         const result = await handler(args)
         if (result !== undefined) {

@@ -8,11 +8,10 @@
  * 命令：
  *   list-agents <workspace>              列出该项目下已存在记忆的 agents
  *   check <workspace> <agent>            检查该 agent 的记忆是否已初始化
- *   ensure-root <workspace> <agent>      仅创建 5+2 件套空骨架（不写内容）
- *   write-profile <workspace> <agent>    --profile <jsonStr>
- *                                        写 profile.json（覆盖）
- *   write-personality <workspace> <agent> --personality <jsonStr>
- *                                        写 personality.json（覆盖）
+ *   ensure-root <workspace> <agent>      仅创建 memory-raw.md 骨架（index/sources/consolidated 懒创建）
+ *   write-identity <workspace> <agent>   --identity <jsonStr> | --identity-file <path>
+ *                                        写 identity.json（v2，合并 profile+personality）
+ *   write-profile / write-personality    （旧七件套兼容命令，仍可用）
  *   write-active <workspace> <agent> --active <jsonStr>
  *                                        写 memory-active.json（覆盖）
  *   append-raw <workspace> <agent> <markdownBlock>
@@ -20,15 +19,12 @@
  *   read <workspace> <agent> [section]   读取记忆（不指定 section 时输出全部摘要）
  *   role-hints <workspace> <agent>       从 team config 读出 agent 的 role 与 memoryHints
  *
- * 记忆五件套（沿用 thoughts 的 HMO-lite，去掉 mind-state）：
- *   memory-active.json       当前最该影响行为的活跃记忆，优先级最高
- *   memory-index.jsonl       带元数据的长期记忆索引，支持升降级
- *   memory-sources.jsonl     原文证据，用于防止总结漂移
- *   memory-consolidated.md   人类可读摘要，不是主记忆源
- *   memory-raw.md            待整理候选池
- * 加上：
- *   profile.json             静态画像
- *   personality.json         沟通风格 / 人设 / 边界
+ * 精简三件套（v2，HMO-lite 再精简，去掉 mind-state）：
+ *   identity.json            静态身份画像（合并了旧 profile + personality），启动只读一次
+ *   memory-active.json       当前活跃约束 + ongoingTasks + lastSeenBlackboardHashes，每轮读
+ *   memory-raw.md            候选记忆池，待整理
+ * 懒创建（当前无自动整理流程，不预建）：memory-index.jsonl / memory-sources.jsonl / memory-consolidated.md
+ * 兼容旧七件套：profile.json / personality.json 仍可被探测与读取
  *
  * 所有命令输出 JSON。
  */
@@ -65,8 +61,35 @@ function normalizeWorkspace(value) {
     return result
 }
 
+/**
+ * 目标 IDE：'cursor' | 'claude'。在 main() 里解析一次后，teamDirFor 据它给出
+ * .cursor/.team 或 .claude/.team。必须和 tvs-team-spawn 的落盘目录一致，
+ * 否则 mind-seed 写的记忆会和团队 skill 读的位置对不上。
+ */
+let TARGET = 'cursor'
+
+function ideTeamDir(target) {
+    return target === 'claude' ? ['.claude', '.team'] : ['.cursor', '.team']
+}
+
+/** 探测已部署的 target：团队 config 或已有 memory 目录在哪个 IDE 下。 */
+function detectTarget(ws) {
+    if (existsSync(join(ws, '.claude', '.team', 'config.json'))) return 'claude'
+    if (existsSync(join(ws, '.cursor', '.team', 'config.json'))) return 'cursor'
+    // standalone：没团队配置时看已有的 memory 目录
+    if (existsSync(join(ws, '.claude', '.team', 'memory'))) return 'claude'
+    if (existsSync(join(ws, '.cursor', '.team', 'memory'))) return 'cursor'
+    return null
+}
+
+/** 解析 target：显式 --target 优先，其次探测，最后回退 cursor（兼容老部署）。 */
+function resolveTarget(args, ws) {
+    if (args.target === 'claude' || args.target === 'cursor') return args.target
+    return detectTarget(ws) ?? 'cursor'
+}
+
 function teamDirFor(ws) {
-    return join(ws, '.cursor', '.team')
+    return join(ws, ...ideTeamDir(TARGET))
 }
 
 function memoryRoot(ws) {
@@ -121,13 +144,16 @@ function writeJsonAtomic(path, value) {
  * ========================================================================= */
 
 const FILE_LAYOUT = {
+    // 精简三件套（v2 默认）：identity 合并了旧的 profile + personality
+    identity: 'identity.json',
+    active: 'memory-active.json',
+    raw: 'memory-raw.md',
+    // 兼容旧七件套（仍可被读取/探测；不再自动创建）
     profile: 'profile.json',
     personality: 'personality.json',
-    active: 'memory-active.json',
     index: 'memory-index.jsonl',
     sources: 'memory-sources.jsonl',
     consolidated: 'memory-consolidated.md',
-    raw: 'memory-raw.md',
 }
 
 function fileFor(ws, agent, key) {
@@ -215,9 +241,12 @@ function cmdListAgents(args) {
         agents.push({
             name: e.name,
             path: toRel(ws, dir),
+            hasIdentity: existsSync(join(dir, FILE_LAYOUT.identity)),
+            hasActive: existsSync(join(dir, FILE_LAYOUT.active)),
+            hasRaw: existsSync(join(dir, FILE_LAYOUT.raw)),
+            // 兼容旧七件套部署
             hasProfile: existsSync(join(dir, FILE_LAYOUT.profile)),
             hasPersonality: existsSync(join(dir, FILE_LAYOUT.personality)),
-            hasActive: existsSync(join(dir, FILE_LAYOUT.active)),
         })
     }
     return { ok: true, agents }
@@ -258,13 +287,11 @@ function cmdEnsureRoot(args) {
         created.push(toRel(ws, path))
     }
 
-    // jsonl 文件直接建空文件即可
-    ensureEmpty('index', '')
-    ensureEmpty('sources', '')
+    // 精简三件套：ensure-root 只建 raw 候选池骨架。
+    // identity / active 由 mind-seed 引导后用 write-identity / write-active 写入。
+    // index / sources / consolidated 改为"懒创建"——当前没有自动整理流程，不再预先铺空骨架（省得每次都摄入空文件）。
     ensureEmpty('raw', defaultRawMd(agent))
-    ensureEmpty('consolidated', defaultConsolidatedMd(agent))
 
-    // profile/personality/active 不在 ensure-root 阶段写默认（让 mind-seed 引导填充）
     return { ok: true, agent, dir: toRel(ws, dir), created }
 }
 
@@ -385,6 +412,40 @@ function cmdWritePersonality(args) {
     return { ok: true, agent, path: toRel(ws, path) }
 }
 
+/**
+ * 写 identity.json（v2 精简三件套）——合并了旧 profile + personality。
+ * 字段建议：codename / role / roleDisplayName / positioning / focus[] / outOfScope[]
+ *           / communicationStyle / tone / boundaries[] / traits[] / catchphrase / quirks / roleSeed / notes
+ * 启动时只读它 + memory-active 两个文件即可恢复身份与硬约束。
+ */
+function cmdWriteIdentity(args) {
+    const ws = normalizeWorkspace(args._[0] ?? process.cwd())
+    const agent = args._[1]
+    if (!agent) throw new Error('write-identity: missing <agent>')
+    const identityStr = readJsonInputArg(args, 'identity', 'identity-file', 'write-identity')
+    if (!identityStr) throw new Error('write-identity: --identity <jsonStr> or --identity-file <path> is required')
+
+    let identity
+    try {
+        identity = JSON.parse(identityStr)
+    } catch (e) {
+        throw new Error(`write-identity: identity is not valid JSON: ${e.message}`)
+    }
+
+    const dir = memoryDir(ws, agent)
+    ensureDir(dir)
+
+    identity.schemaVersion = identity.schemaVersion ?? 2
+    identity.agent = agent
+    identity.updatedAt = new Date().toISOString()
+    if (!identity.createdAt) identity.createdAt = identity.updatedAt
+
+    const path = fileFor(ws, agent, 'identity')
+    writeJsonAtomic(path, identity)
+
+    return { ok: true, agent, path: toRel(ws, path) }
+}
+
 function cmdWriteActive(args) {
     const ws = normalizeWorkspace(args._[0] ?? process.cwd())
     const agent = args._[1]
@@ -498,6 +559,7 @@ const COMMANDS = {
     check: cmdCheck,
     'ensure-root': cmdEnsureRoot,
     'role-hints': cmdRoleHints,
+    'write-identity': cmdWriteIdentity,
     'write-profile': cmdWriteProfile,
     'write-personality': cmdWritePersonality,
     'write-active': cmdWriteActive,
@@ -524,6 +586,8 @@ function main() {
         process.exit(2)
     }
     const args = parseArgs(argv.slice(1))
+    // target 在分发前解析一次：显式 --target 优先，否则探测已部署目录，回退 cursor
+    TARGET = resolveTarget(args, normalizeWorkspace(args._[0] ?? process.cwd()))
     try {
         const result = handler(args)
         if (result !== undefined) {
