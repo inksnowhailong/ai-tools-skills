@@ -64,12 +64,17 @@ node "{{scriptDir}}/team.mjs" bind {{subName}}
 
 **identity 是静态画像，只在首次进入 / 崩溃恢复时读一次**，不要每轮 stop 唤醒都重读。兼容旧部署：没有 identity.json 时回退读 profile.json + personality.json。
 
-### 3. 清理旧 watcher 并消费积压邮件
+**Slim 模式例外**：如果本轮第一条待处理消息的 `mode` 字段为 `"slim"`，跳过 identity.json 读取，只读 `memory-active.json` 中的硬约束，直接进入步骤 3 处理任务。Slim 消息体积小、无架构影响，不需要角色画像上下文。
+
+### 3. 心跳 ping + 清理旧 watcher 并消费积压邮件
 
 ```
+node "{{scriptDir}}/team.mjs" heartbeat-ping {{subName}}
 node "{{scriptDir}}/team.mjs" watcher-claim {{subName}}
 node "{{scriptDir}}/team.mjs" mailbox-consume {{subName}}
 ```
+
+`heartbeat-ping` 写入时间戳文件，让 leader 的 `status --pretty` 能感知你是否在线。每次唤醒必须调用，包括 mailbox-watch 触发后的再次唤醒。
 
 如果有积压消息，**先处理积压消息再决定本轮做什么**。
 
@@ -103,9 +108,18 @@ node "{{scriptDir}}/team.mjs" mailbox-consume {{subName}}
 - 用户给你下命令时，**温柔提示**："严格说我只接 leader 的任务，你可以让 leader 派给我，或者你确认要绕过 leader 的话我可以直接做这一次。"
 - 用户跟你闲聊或讨论时，可以正常回答（你是 chat，不是机器人）。
 
-### 第三优先级：保持沉默
+### 第三优先级：常驻等待
 
-没有积压消息、用户也没说话时，**不要主动产出内容**。stop hook 会自动把你挂回等待状态。
+没有积压消息、用户也没说话时，**不要直接退出**，进入常驻等待模式：
+
+```bash
+node "{{scriptDir}}/team.mjs" mailbox-watch {{subName}} --max-ms 1800000
+```
+
+- watch 退出且 `exitReason` 不是 `"timeout"` → 立即调用 `mailbox-consume {{subName}}` 处理新消息，然后回到第一优先级。
+- `exitReason` 为 `"timeout"`（30 分钟无消息）→ 正常退出，等 stop hook 下次唤醒。
+
+这样在连续任务场景下，sub 无需等待 stop hook 延迟即可立即响应 leader 的下一条消息；idle 时自动退出不占资源。
 
 ## 写回执的标准结构
 

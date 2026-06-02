@@ -1186,10 +1186,27 @@ function cmdWatcherClaim(args) {
     return { ok: true, agent, pid: process.pid, killedOldPid }
 }
 
+function cmdHeartbeatPing(args) {
+    const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const agent = args._[0]
+    if (!agent) throw new Error('heartbeat-ping: missing <agent>')
+
+    const teamDir = teamDirFor(ws)
+    const hbFile = join(teamDir, 'watchers', `${agent}.heartbeat`)
+    ensureDir(dirname(hbFile))
+    const ts = new Date().toISOString()
+    atomicWriteFile(hbFile, ts)
+    return { ok: true, agent, timestamp: ts }
+}
+
 function cmdStatus(args) {
     const ws = normalizeWorkspace(args.workspace ?? process.cwd())
+    const pretty = !!args.pretty
     const config = readConfig(ws)
-    if (!config) return { ok: false, message: 'team not initialized' }
+    if (!config) {
+        if (pretty) { process.stdout.write('团队未初始化\n'); return undefined }
+        return { ok: false, message: 'team not initialized' }
+    }
 
     const teamDir = teamDirFor(ws)
 
@@ -1222,28 +1239,129 @@ function cmdStatus(args) {
         }
     }
 
-    return {
-        ok: true,
-        status: {
-            teamName: config.teamName,
-            target: config.target ?? TARGET,
-            teamDir: toRel(ws, teamDir),
-            leader: {
-                name: config.leaderName,
-                inbox: countInbox(config.leaderName),
-                watcher: checkWatcher(config.leaderName),
-            },
-            subs: config.subs.map((s) => ({
-                name: s.name,
-                role: s.role,
-                model: s.model,
-                worktree: s.worktree,
-                inbox: countInbox(s.name),
-                watcher: checkWatcher(s.name),
-            })),
-            bindings: config.bindings ?? {},
-        },
+    // 读 leader memory-active.json 里的 ongoingTasks（轻量任务追踪）
+    const memActivePath = join(teamDir, 'memory', config.leaderName, 'memory-active.json')
+    const memActive = readJson(memActivePath, {})
+    const ongoingTasks = Array.isArray(memActive.ongoingTasks) ? memActive.ongoingTasks : []
+
+    // 读心跳文件：sub 每次唤醒时写入，用于检测断线
+    function checkHeartbeat(agent) {
+        const hbFile = join(teamDir, 'watchers', `${agent}.heartbeat`)
+        if (!existsSync(hbFile)) return null
+        try {
+            const ts = readTextFile(hbFile).trim()
+            const ageMs = Date.now() - new Date(ts).getTime()
+            return { timestamp: ts, ageMs }
+        } catch {
+            return null
+        }
     }
+
+    const leaderData = {
+        name: config.leaderName,
+        inbox: countInbox(config.leaderName),
+        watcher: checkWatcher(config.leaderName),
+        heartbeat: checkHeartbeat(config.leaderName),
+    }
+    const subsData = config.subs.map((s) => ({
+        name: s.name,
+        role: s.role,
+        model: s.model,
+        worktree: s.worktree ?? null,
+        inbox: countInbox(s.name),
+        watcher: checkWatcher(s.name),
+        heartbeat: checkHeartbeat(s.name),
+    }))
+
+    if (!pretty) {
+        return {
+            ok: true,
+            status: {
+                teamName: config.teamName,
+                target: config.target ?? TARGET,
+                teamDir: toRel(ws, teamDir),
+                leader: leaderData,
+                subs: subsData,
+                ongoingTasks,
+                bindings: config.bindings ?? {},
+            },
+        }
+    }
+
+    // ── Pretty 可视化输出 ──────────────────────────────────────────────────
+    const now = Date.now()
+    const ts = new Date().toLocaleString('zh-CN', { hour12: false })
+    const W = '══════════════════════════════════════════════'
+    const lines = []
+
+    lines.push(`团队 ${config.teamName}  [${ts}]`)
+    lines.push(W)
+
+    // 判断某个 sub 是否疑似断线：有在飞任务 + 心跳超时
+    const DEAD_THRESHOLD_MS = 12 * 60 * 1000 // 12 分钟无心跳视为疑似断线
+    const inFlightOwners = new Set(ongoingTasks.map((t) => t.owner).filter(Boolean))
+    function isSuspectDead(m) {
+        if (!inFlightOwners.has(m.name)) return false
+        const hb = m.heartbeat
+        if (!hb) return true // 有任务但从未 ping 过，视为可疑
+        return hb.ageMs > DEAD_THRESHOLD_MS
+    }
+
+    function fmtAge(ms) {
+        if (ms == null) return ''
+        const m = Math.floor(ms / 60000)
+        return m < 1 ? '<1m前' : `${m}m前`
+    }
+
+    // 成员状态
+    lines.push('成员')
+    const allMembers = [
+        { name: config.leaderName, inbox: leaderData.inbox, watcher: leaderData.watcher, heartbeat: leaderData.heartbeat },
+        ...subsData,
+    ]
+    for (const m of allMembers) {
+        const alive = m.watcher?.alive === true
+        const dot = alive ? '●' : '○'
+        const state = (alive ? 'watcher活跃' : '离线').padEnd(10)
+        const inboxTotal = Object.values(m.inbox).reduce((a, b) => a + b, 0)
+        const inboxStr = inboxTotal > 0 ? `inbox: ${inboxTotal}条未读` : ''
+        const hbStr = m.heartbeat ? `活跃: ${fmtAge(m.heartbeat.ageMs)}` : ''
+        const deadWarn = isSuspectDead(m) ? '  ⚠ 可能已断线' : ''
+        lines.push(`  ${m.name.padEnd(18)} ${dot} ${state}  ${hbStr.padEnd(12)}  ${inboxStr}${deadWarn}`)
+    }
+
+    // 进行中任务（来自 leader memory-active.json ongoingTasks）
+    lines.push('')
+    if (ongoingTasks.length > 0) {
+        lines.push(`进行中 (${ongoingTasks.length})`)
+        for (const t of ongoingTasks) {
+            const dispMs = t.dispatchedAt ? new Date(t.dispatchedAt).getTime() : null
+            const elapsed = dispMs != null ? Math.floor((now - dispMs) / 60000) : null
+            const elapsedStr = elapsed != null ? `${elapsed}m` : ''
+            const warn = (t.deadline_ms && elapsed != null && elapsed * 60000 > t.deadline_ms * 0.8) ? ' ⚠' : ''
+            const taskId = `[${(t.id ?? '?').slice(0, 10)}]`.padEnd(13)
+            const owner = (t.owner ?? '').padEnd(16)
+            const level = (t.level ?? '').padEnd(8)
+            const title = (t.title ?? '').slice(0, 28)
+            lines.push(`  ${taskId} ${owner} ${level} ${title.padEnd(28)}  ${elapsedStr}${warn}`)
+        }
+    } else {
+        lines.push('进行中: 无')
+    }
+
+    // 收件箱未读汇总
+    const unreadEntries = Object.entries(leaderData.inbox)
+    if (unreadEntries.length > 0) {
+        lines.push('')
+        lines.push('收件箱未读')
+        for (const [dir, cnt] of unreadEntries) {
+            lines.push(`  leader ← ${dir.replace('from-', '')}: ${cnt}条`)
+        }
+    }
+
+    lines.push(W)
+    process.stdout.write(lines.join('\n') + '\n')
+    return undefined
 }
 
 /* =========================================================================
@@ -1295,6 +1413,7 @@ const COMMANDS = {
     'worktree-assign': cmdWorktreeAssign,
     'worktree-list': cmdWorktreeList,
     'watcher-claim': cmdWatcherClaim,
+    'heartbeat-ping': cmdHeartbeatPing,
     'check-deps': cmdCheckDeps,
     'install-deps': cmdInstallDeps,
     status: cmdStatus,
