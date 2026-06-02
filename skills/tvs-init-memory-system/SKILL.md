@@ -1,10 +1,12 @@
 ---
 name: tvs-init-memory-system
-description: 跨工具（Cursor / Claude Code / Codex）一次性部署"记忆系统 + codegraph 分工配合"。生成维护子 Agent、会话结束 hook、.memory 骨架、记忆宪法规则、codegraph 自愈安装与初始化基线。**显式调用、不自动触发**——仅当用户明示"运行 tvs-init-memory-system / 部署记忆系统 / init memory / 初始化项目记忆"等需求时，由用户手动唤起本 Skill；AI 不得仅因 description 关键词命中就主动加载执行。
+description: 跨工具（Cursor / Claude Code / Codex）一次性部署"团队级记忆系统 + codegraph 分工配合"。生成维护子 Agent、会话结束 hook（分支感知触发判断 + 时间衰减门槛 + 跨成员去重，全程代码判断零 AI）、.memory 骨架（含团队共享维护元数据）、记忆宪法规则、codegraph 自愈安装与初始化基线。**显式调用、不自动触发**——仅当用户明示"运行 tvs-init-memory-system / 部署记忆系统 / init memory / 初始化项目记忆"等需求时，由用户手动唤起本 Skill；AI 不得仅因 description 关键词命中就主动加载执行。
 disable-model-invocation: true
 ---
 
-# tvs-init-memory-system：跨工具一次性部署记忆系统 + codegraph 分工配合（v3）
+# tvs-init-memory-system：跨工具一次性部署团队级记忆系统 + codegraph 分工配合（v4）
+
+> **v4 团队化要点**（相对 v3 的增量）：① hook 的"是否唤起维护子 Agent"判断**新增分支维度**（当前分支 / 分支领先集成线提交数 / 距上次维护时间），按**时间衰减门槛**缩放，全程代码判断、零 AI；② 维护元数据（上次谁/何时/哪分支维护了什么 + 各分支负责人）落在**入库共享**的 `跨分支在研功能地图.md`（hook 写机读锚点 + 子 Agent 写人读表格），团队成员间**跨成员去重**避免重复维护；③ codegraph 从"可选解耦层"升级为**维护子 Agent 自检的依赖**（仅路径/符号校验，装不上回退 git cat-file/Glob），安装提示更强；④ 记忆**防膨胀**：事前准入黑名单（H）+ 事后增量去冗余（G），双向压住 .memory 膨胀导致的 token 浪费。
 
 > **⚠️ 调用约束**：本 Skill **不会被 AI 自动触发**（frontmatter 已声明 `disable-model-invocation: true`）。必须由用户在对话中显式说出"运行 tvs-init-memory-system / 部署记忆系统 / 初始化项目记忆"或等价指令后，AI 才应当读入本文件并按下面流程执行。如果你（AI）只是因为对话里出现了"记忆系统"四个字就想自动跑本 Skill，请**停下**——这不在本 Skill 的允许触发范围内。
 
@@ -93,17 +95,18 @@ codegraph 不可用时 .memory 依然完整运行。
 
 ### 不互相侵入原则
 
-- **.memory 不再记录纯代码结构信息**：barrel 路径、数据源/适配器、调用链这些"AST 看一眼就知道"的内容，让 codegraph 答；.memory 只在它有业务含义时才记录（如"这个 barrel 名字本身代表领域内核边界"）。
-- **子 Agent 不调用 codegraph 工具**：维护 .memory 时仍使用 Glob / rg / Read 反查源码路径。我们刻意**不把 codegraph 作为子 Agent 的依赖**，原因有二：（a）让子 Agent 调用次数保持最少；（b）保证 codegraph 未装/装失败/语言不支持时 .memory 依然能跑。
+- **.memory 不再记录纯代码结构信息**：barrel 路径、数据源/适配器、调用链、**函数签名 / 参数 / 返回值 / 类型**这些"AST 看一眼就知道"的内容，让 codegraph 答；.memory 只在它有业务含义时才记录（如"这个 barrel 名字本身代表领域内核边界"）。
+- **子 Agent 自检会用 codegraph（v4 调整，仅限路径/符号校验）**：维护 .memory 的主体逻辑仍用 Glob / rg / Read，但**维护后强制自检的"路径/符号是否存在"校验，优先用 `codegraph_search` 替代 git cat-file/Glob**（更准、且 sub-ms + 只回结构事实，比 grep/read 试错更省 token）。这是 v4 相对 v3 的有意调整——codegraph 因此升级为**维护子 Agent 自检的依赖**。**硬安全网**：codegraph 不可用（未装/装失败/语言不支持）时，自检**回退** git cat-file/Glob，维护能力下降但**绝不瘫痪**。除路径校验外，子 Agent 不主动用 codegraph 做契约/影响面/调用链（控制调用次数）。
+- **记忆防膨胀是双向的（v4 新增 G + H）**：除"不再记录"的事前规则（H 写入准入黑名单），子 Agent 在**维护某模块时顺手删掉该模块档案里 codegraph 已能回答的存量结构冗余**（G 增量去冗余，零额外扫描）；hook 用代码统计 .memory 体积超标即提示精简（零 AI）。**不做定期全量 AI 去冗余扫描**——那会为省 token 反而狂耗 token。
 - **codegraph 的指令文件我们不写、不改**：codegraph 官方安装器（`npx @colbymchenry/codegraph`）会自动给当前工具写好"怎么用 codegraph 工具"的指南（Cursor `.cursor/rules/codegraph.mdc` / Claude `CLAUDE.md` / Codex `~/.codex/AGENTS.md`）。本 Skill 只在"记忆宪法"里写一句分工路由（业务查 .memory、结构查 codegraph），不与之重叠。
 
 ### 为什么明明可被替代仍然不替代
 
-| 看似可被 codegraph 替代的能力 | 为什么我们仍**不替代** |
+| 能力 | v4 处理 |
 |---|---|
-| 子 Agent "反查源码路径"用 Glob/rg/Read | 替代成 codegraph 反查会让子 Agent 调用次数变多，违背"子 Agent 调用更少"目标 |
-| lint-memory 字符串模式扫描旧路径 | 同上；且 lint 是 CI / 定期任务，不应依赖 MCP 服务可用性 |
-| 模块档案记 barrel / 数据源 | 这是 codegraph 强项，让 .memory 让位；但**业务含义部分**仍保留 |
+| 子 Agent 维护主体"反查源码路径"用 Glob/rg/Read | **仍用 Glob/rg/Read**（控制调用次数）；但**自检阶段的路径/符号存在性校验改用 `codegraph_search`**（更准更省 token，装不上回退 git cat-file/Glob） |
+| lint-memory 字符串模式扫描旧路径 / changelog 关键词 | **不用 codegraph**：lint 是 CI / 定期任务，纯代码字符串扫描，不应依赖 MCP 服务可用性 |
+| 模块档案记 barrel / 数据源 / 函数签名参数 | 这是 codegraph 强项，**.memory 完全让位**（H 黑名单事前拦 + G 事后删存量）；仅**业务含义部分**保留 |
 
 ---
 
@@ -358,6 +361,7 @@ instructions = """
 - package / 依赖文件
 - 当前 git diff
 - 已有项目记忆
+- `codegraph_*` 工具（v4：**仅自检阶段**校验路径/符号是否存在；不可用时回退 git plumbing / Glob）
 
 ## 允许写入
 
@@ -377,8 +381,8 @@ instructions = """
 3. 每个模块记录：模块职责、业务流程、数据契约、关键规则、已知风险。
 4. 记忆文件不是变更日志，不记录"本次改了什么"。
 5. 只记录项目稳定情况，不记录临时猜测。
-6. 不复述代码实现细节，也不重复 codegraph 答得了的纯结构信息（调用关系、数据源路径、调用链、符号位置）——除非该结构信息**本身承载业务含义**（如"刻意只对接 X 服务以满足合规约束"）。结构信息查询请走 `codegraph_*` 工具，本档不再重复。
-7. 每条重要记忆必须标注来源文件。
+6. 不复述代码实现细节，也不重复 codegraph 答得了的纯结构信息（调用关系、数据源路径、调用链、符号位置）——除非该结构信息**本身承载业务含义**（如"刻意只对接 X 服务以满足合规约束"）。结构信息查询请走 `codegraph_*` 工具，本档不再重复。另严格挡掉这些（H 写入黑名单）：函数签名 / 参数 / 返回值 / 类型、代码注释或 JSDoc 的转述、临时进度 / TODO、低复用价值的过度细节、changelog 式「本次改了什么」记录。
+7. 来源标注降为**模块级**（标到"本模块"即可），不必每条堆具体文件路径 / 行号——精确符号定位交给 codegraph。
 8. 不确定内容写入"待确认问题.md"，不能伪造成事实。
 9. 没有值得沉淀的项目知识则 no-op，不要强行更新。
 10. 每次只更新受影响模块，不重写整个记忆层。
@@ -387,14 +391,16 @@ instructions = """
     - "当前事实"以**集成线**（通常 dev / develop / main，按项目实际）为准，而非临时检出的 feature 分支。
     - 某能力只在 feature 分支迭代、尚未并入集成线时，记入 `跨分支在研功能地图.md`（功能 → 分支 → 一句话状态），**不写成模块档案的当前事实，也绝不写"当前分支没有 X"这种无用噪音**。
     - "哪个分支在迭代什么"对开发者和 AI 都是高价值导航信息，而 codegraph 只索引当前检出、给不了——这是 .memory 的独特价值。
+13. **维护即去冗余（增量，不全量）**：维护某模块时，顺手删掉该模块档案里 codegraph 已能回答的存量结构冗余（旧函数签名、纯文件路径、调用关系）。只清理你正在维护的这个模块，**不为去冗余单独全量扫描整个 .memory**（那会反向耗 token）。
 
 ## 维护后强制自检
 
 写入 `.memory/**` 后，维护员必须执行以下自检，**不通过则禁止刷新基线**：
 
-1. **反查源码路径（按集成线，不锚定当前检出分支）**：扫描本次新增 / 修改内容中出现的所有源码路径（`src/xxx`）、目录名、API 入口、模块名。判定基线是**集成线**（dev / develop / main，按项目实际；首次运行时确认一次），用 git plumbing 校验，不要只看当前工作树、也不要切分支：
-   - `git cat-file -e <集成线>:<path>` 成功 = 该路径在集成线存在 = 可作为当前事实。
-   - 当某能力在集成线存在但不在当前工作树时，用 `git show <集成线>:<path>` 读集成线版本来写准内容。
+1. **反查源码路径 / 符号（v4：优先 codegraph，回退 git plumbing）**：扫描本次新增 / 修改内容中出现的所有源码路径（`src/xxx`）、目录名、API 入口、模块名、符号名，校验它们当前是否真实存在。
+   - **首选 codegraph（更准、sub-ms、只回结构事实，比 grep/read 试错省 token）**：`codegraph_search <符号/文件>` 确认存在与位置。这是 v4 把 codegraph 设为维护依赖的**唯一**用途。
+   - **codegraph 不可用时回退 git plumbing**（判定基线是**集成线** dev/develop/main，首次运行确认一次，不锚定当前检出分支）：`git cat-file -e <集成线>:<path>` 成功 = 该路径在集成线存在 = 可作为当前事实；某能力在集成线存在但不在当前工作树时，用 `git show <集成线>:<path>` 读集成线版本写准内容。
+   - 无论用哪条，都**不要只看当前工作树、也不要切分支**。
 2. **路径在集成线不存在时四选一**：
    - 改成集成线上的实际路径。
    - 只在某 feature 分支存在 → 移到 `跨分支在研功能地图.md`（功能 → 分支 → 状态），不要当模块档案的当前事实。
@@ -434,6 +440,8 @@ instructions = """
 这条直接针对 shirehub-central 评估中发现的"spaces / members 写 300+ 行，dashboard / compliance / plans 只十几行浅描述"覆盖不均问题，以及 `.memory` 437KB 持续膨胀问题。同时通过"去结构化、强化业务化"，让 .memory 与 codegraph 分工更清晰、子 Agent 调用频率自然降低（业务知识变化比代码结构慢得多）。
 
 ## 维护完成后
+
+**v4 先更新跨分支地图人读表格**：若本轮维护涉及某分支在研功能，在 `.memory/跨分支在研功能地图.md` 表格里登记/更新 功能 / 分支 / 负责人（`git config user.name`）/ 状态 / 上次维护。机读锚点 `<!-- mem-meta -->` 由下面 `--mark-done` 自动写（who/when/branch/head），你只管人读那几列。
 
 无论本轮是真维护了，还是判断 no-op，结束前都要先完成"维护后强制自检"；自检通过后执行（路径按宿主工具替换 `.cursor/` → `.claude/` / `.codex/`）：
 
@@ -477,6 +485,15 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
  *   3. 子代理协作 —— 维护成功后调用 `--mark-done` 刷新基线，下次仅看新增量。
  *   4. 手动控制 —— `--force` 强制提示一次，`--reset` 清空状态，`--status` 查看状态。
  *   5. 可选 commit-only 模式 —— `requireHeadAdvance=true` 时只在 HEAD 前进后才计入。
+ *
+ *   ── v4 团队化增量（全程代码判断、零 AI）──
+ *   6. 分支感知触发 —— 纳入「当前分支 / 分支领先集成线提交数 / 距上次维护时间」三维度。
+ *   7. 时间衰减门槛 —— 距上次维护越久，文件/提交阈值越低（连续缩放，非硬阈值）：
+ *      <2天 ×1.5（更难触，别烦）；2-7天 ×1.0；>7天 ×0.5；>14天 有相关变更即触发。
+ *   8. 跨成员去重 —— 上次维护到的 commit 记在入库的 `跨分支在研功能地图.md` 机读锚点
+ *      `<!-- mem-meta: {...} -->` 里；当前分支 HEAD 已被该锚点 head 覆盖则跳过（团队成员 pull 即共享）。
+ *   9. 防膨胀信号 —— 统计 `.memory/**.md` 体积，单文件/总量超阈值即在提示里追加精简建议（零 AI）。
+ *  10. lint 增 changelog 检测 —— `--lint-memory` 额外扫描"本次改了什么"式 changelog 噪音。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -582,33 +599,53 @@ const ARCHITECTURE_PATTERNS = SELECTED_PRESET_CONFIG.architecture
 
 /** 触发阈值与节流配置，按项目实际节奏调整 */
 const CONFIG = {
-    /** 自上次维护以来变更文件数 ≥ 此值才触发 */
+    /** 自上次维护以来变更文件数 ≥ 此值才触发（会被时间衰减因子缩放） */
     deltaFileThreshold: 5,
-    /** 自上次维护以来变更行数 ≥ 此值才触发（按 deltaFiles 相对 HEAD 计） */
+    /** 自上次维护以来变更行数 ≥ 此值才触发（按 deltaFiles 相对 HEAD 计；会被时间衰减因子缩放） */
     deltaLineThreshold: 200,
     /** 距离上次提示的冷却时间（分钟）；冷却内即使有新增量也不重复提示 */
     cooldownMinutes: 30,
     /** 是否要求 HEAD 前进（commit 之后）才计入触发分数；默认关闭 */
     requireHeadAdvance: false,
+    // ── v4 团队化配置 ──
+    /** 集成线候选；探测时取第一个本地存在的分支作为"集成线"，用于算分支领先提交数 */
+    integrationBranchCandidates: ['dev', 'develop', 'main', 'master'],
+    /** 当前分支领先集成线的提交数 ≥ 此值即独立触发（攒了不少活该维护了；会被时间衰减缩放） */
+    branchAheadThreshold: 10,
+    /** 距上次维护 > 此天数且有任何相关变更即触发（长期不维护的兜底；与时间衰减 >14天 规则一致） */
+    staleMaintenanceDays: 14,
+    /** 单个 .memory md 文件软上限（字节）；超过即在提示里追加"该文件膨胀了考虑精简" */
+    memoryFileSoftLimitBytes: 8192,
+    /** .memory md 总量软上限（字节）；超过即在提示里追加整体精简建议 */
+    memoryTotalSoftLimitBytes: 102400,
     /** 旧路径占位；真实旧路径每个项目特定，请按项目情况补进 */
     lintMemoryStalePathPatterns: [
         'src/legacy/',
         'src/old/',
         'src/deprecated/',
     ],
+    /** changelog 式噪音关键词；--lint-memory 命中（且无"历史"语境）即判 lint 失败，逼记忆别写成变更日志 */
+    lintChangelogPatterns: [
+        '本次修改', '本次改动', '本次新增', '本次变更', '## 变更记录', '## 更新日志', '本轮改了',
+    ],
 }
 
 const STATE_FILE = '.memory/.hook-state.json'
+/** 团队共享维护元数据载体：人读表格 + 机读锚点共处一个入库文件 */
+const CROSS_BRANCH_MAP_FILE = '.memory/跨分支在研功能地图.md'
+/** 机读锚点正则：从跨分支地图里提取 <!-- mem-meta: {...} --> 的 JSON（比解析 md 表格稳健） */
+const MEM_META_RE = /<!--\s*mem-meta:\s*(\{[\s\S]*?\})\s*-->/
 const LIST_LIMIT = 12
 
-function runGit(args) {
+function runGit(args, { silent = false } = {}) {
     try {
         return execFileSync('git', ['-c', 'core.quotePath=false', ...args], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
         }).trim()
     } catch (err) {
-        process.stderr.write(`[memory-hook] git ${args.join(' ')} 失败：${err.message}\n`)
+        // silent：探测候选分支是否存在这类"预期可能失败"的调用，不打 stderr 噪音
+        if (!silent) process.stderr.write(`[memory-hook] git ${args.join(' ')} 失败：${err.message}\n`)
         return ''
     }
 }
@@ -710,11 +747,97 @@ const minutesSince = (iso) => {
     return (Date.now() - new Date(iso).getTime()) / 60000
 }
 
+const daysSince = (iso) => minutesSince(iso) / 1440
+
+/**
+ * 时间衰减因子：距上次维护越久，阈值缩放越小（越容易触发）。
+ * <2天 ×1.5（刚维护完，别拿小变动烦人）；2-7天 ×1.0；>7天 ×0.5；>14天 →0（有相关变更即触发）。
+ * 返回 0 表示阈值归零：任意相关变更都过门槛。
+ */
+function decayFactor(days) {
+    if (days < 2) return 1.5
+    if (days <= 7) return 1.0
+    if (days <= 14) return 0.5
+    return 0
+}
+
+/** 探测集成线：取第一个本地存在的候选分支（dev/develop/main/master）。算分支领先提交数用。 */
+function resolveIntegrationBranch() {
+    for (const b of CONFIG.integrationBranchCandidates) {
+        if (runGit(['rev-parse', '--verify', '--quiet', b], { silent: true })) return b
+    }
+    return null
+}
+
+/** 当前检出分支名（detached 时回退 'HEAD'） */
+const currentBranch = () => runGit(['rev-parse', '--abbrev-ref', 'HEAD']) || 'HEAD'
+
+/** 当前分支领先集成线的提交数 = git rev-list --count <集成线>..HEAD */
+function branchAheadCount(integration) {
+    if (!integration) return 0
+    const n = Number.parseInt(runGit(['rev-list', '--count', `${integration}..HEAD`]), 10)
+    return Number.isFinite(n) ? n : 0
+}
+
+/** 读入库跨分支地图里的机读锚点（团队共享的维护元数据）。无则返回 null。 */
+function readMemMeta() {
+    const f = resolve(CROSS_BRANCH_MAP_FILE)
+    if (!existsSync(f)) return null
+    try {
+        const m = readFileSync(f, 'utf8').match(MEM_META_RE)
+        return m ? JSON.parse(m[1]) : null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * 把机读锚点写/更新进跨分支地图（hook 的职责；人读表格由子 Agent 维护，两者共处一文件互不覆盖）。
+ * 已有锚点就原地替换，没有就插到第一个一级标题之后；文件不存在则建最小骨架。
+ */
+function writeMemMetaIntoMap(meta) {
+    const f = resolve(CROSS_BRANCH_MAP_FILE)
+    const anchor = `<!-- mem-meta: ${JSON.stringify(meta)} -->`
+    let text = existsSync(f)
+        ? readFileSync(f, 'utf8')
+        : '# 跨分支在研功能地图\n\n> 记录各分支在迭代的功能：功能 → 分支 → 负责人 → 状态。由 project-memory-maintainer 维护人读表格；机读锚点由 hook 维护。\n'
+    if (MEM_META_RE.test(text)) {
+        text = text.replace(MEM_META_RE, anchor)
+    } else {
+        const lines = text.split('\n')
+        const idx = lines.findIndex((l) => l.startsWith('# '))
+        if (idx >= 0) lines.splice(idx + 1, 0, anchor)
+        else lines.unshift(anchor)
+        text = lines.join('\n')
+    }
+    try {
+        mkdirSync(dirname(f), { recursive: true })
+        writeFileSync(f, text)
+    } catch (err) {
+        process.stderr.write(`[memory-hook] 写入跨分支地图锚点失败：${err.message}\n`)
+    }
+}
+
+/** 统计 .memory 下 md 体积，找出超软上限的文件（防膨胀信号，零 AI） */
+function computeMemorySizes() {
+    const files = listMarkdownFiles(resolve('.memory'))
+    let total = 0
+    const oversized = []
+    for (const f of files) {
+        try {
+            const sz = statSync(f).size
+            total += sz
+            if (sz > CONFIG.memoryFileSoftLimitBytes) oversized.push({ file: normalizePath(f), bytes: sz })
+        } catch { /* ignore */ }
+    }
+    return { total, oversized, fileCount: files.length }
+}
+
 function emitFollowup(message) {
     process.stdout.write(JSON.stringify({ followup_message: message }))
 }
 
-function buildMessage({ deltaFiles, reasons }) {
+function buildMessage({ deltaFiles, reasons, sizeInfo }) {
     const shown = deltaFiles.slice(0, LIST_LIMIT)
     const remaining = deltaFiles.length - shown.length
     const fileList = shown.map((p) => `- ${p}`).join('\n') +
@@ -731,6 +854,10 @@ function buildMessage({ deltaFiles, reasons }) {
         '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
         '- 只记录项目稳定情况、模块边界、数据契约、工程风格、复用入口和已知风险。',
         '- 不要记录本次改了什么，不要把 `.memory` 写成 changelog。',
+        '- 写入黑名单（严格挡在 .memory 外）：代码注释/JSDoc 转述、临时进度/TODO、低复用价值的过度细节、函数签名/参数/返回值、纯文件路径定位——这些查 codegraph 或源码，不进记忆。',
+        '- 维护某模块时顺手删掉该模块档案里 codegraph 已能回答的存量结构冗余（增量去冗余，别全量扫）。',
+        '- 来源标注降为模块级：标到"本模块"即可，不必每条堆具体文件/行。',
+        '- 维护后同步更新本文件（跨分支在研功能地图.md）的人读表格：功能 / 分支 / 负责人（git user.name）/ 状态 / 上次维护。',
         '',
         'mark-done 质量闸门：',
         '- 维护完成后，先输出自检摘要：本次更新文件清单、反查过的源码路径、发现并处理的过期路径、未能确认的问题。',
@@ -746,6 +873,14 @@ function buildMessage({ deltaFiles, reasons }) {
         '- 该子命令可用于 CI / 定期任务检查 memory 是否漂移；真实旧路径每个项目特定，请按项目情况补进 CONFIG。',
         '- 不刷新基线下次还会再次提示同一批变更。',
         '',
+        ...(sizeInfo && (sizeInfo.oversized.length > 0 || sizeInfo.total > CONFIG.memoryTotalSoftLimitBytes) ? [
+            '记忆体积提醒（防膨胀，零 AI 统计）：',
+            ...(sizeInfo.total > CONFIG.memoryTotalSoftLimitBytes
+                ? [`- .memory 总量 ${(sizeInfo.total / 1024).toFixed(0)}KB 超软上限 ${(CONFIG.memoryTotalSoftLimitBytes / 1024).toFixed(0)}KB，维护时优先精简冗余。`]
+                : []),
+            ...sizeInfo.oversized.map((o) => `- ${o.file} 已 ${(o.bytes / 1024).toFixed(1)}KB 超单文件软上限，考虑拆分或删 codegraph 已覆盖的结构冗余。`),
+            '',
+        ] : []),
         '相关变更文件：',
         fileList,
     ].join('\n')
@@ -762,18 +897,26 @@ function commandMarkDone(stateFile) {
     )
     const fp = computeWorktreeFingerprint(allRelevant)
     const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
+    const branch = currentBranch()
+    const by = runGit(['config', 'user.name']) || 'unknown'
+    const nowIso = new Date().toISOString()
     const prev = readState(stateFile)
     writeState(stateFile, {
         ...prev,
         baselineHead: head,
         baselineFingerprint: fp.files,
         baselineHash: fp.hash,
-        lastMaintainedAt: new Date().toISOString(),
+        lastMaintainedAt: nowIso,
         lastTriggerHash: null,
     })
+    // v4：把"谁/何时/在哪个分支维护到哪个 commit"写进入库的机读锚点，供团队跨成员去重 + 时间衰减判断。
+    // 合并现有锚点，只更新当前分支这一项，保留其他分支的已维护记录。
+    const prevMeta = readMemMeta() || {}
+    const lastMaintained = { ...(prevMeta.lastMaintained || {}), [branch]: head }
+    writeMemMetaIntoMap({ lastMaintained, updatedAt: nowIso, by, branch })
     process.stdout.write(JSON.stringify({
         ok: true,
-        message: `已刷新记忆维护基线，已纳入 ${allRelevant.length} 个相关文件`,
+        message: `已刷新记忆维护基线（分支 ${branch} @ ${head.slice(0, 8)}，维护者 ${by}），纳入 ${allRelevant.length} 个相关文件`,
     }))
 }
 
@@ -786,7 +929,33 @@ function commandReset(stateFile) {
 /** 子命令：打印当前状态，便于排查"为何没触发 / 为何反复触发" */
 function commandStatus(stateFile) {
     const state = readState(stateFile)
-    process.stdout.write(JSON.stringify({ stateFile, config: CONFIG, state }, null, 2))
+    const meta = readMemMeta()
+    const inRepo = inGitRepo()
+    const branch = inRepo ? currentBranch() : null
+    const integration = inRepo ? resolveIntegrationBranch() : null
+    const aheadCount = integration ? branchAheadCount(integration) : null
+    const lastMaintainedIso = meta?.updatedAt || state.lastMaintainedAt || null
+    const days = lastMaintainedIso ? daysSince(lastMaintainedIso) : null
+    const sizes = computeMemorySizes()
+    process.stdout.write(JSON.stringify({
+        stateFile,
+        config: CONFIG,
+        state,
+        v4: {
+            branch,
+            integrationBranch: integration,
+            branchAheadCount: aheadCount,
+            lastMaintainedAt: lastMaintainedIso,
+            daysSinceMaintained: days != null ? Number(days.toFixed(2)) : null,
+            decayFactor: days != null ? decayFactor(days) : null,
+            memMeta: meta,
+            memorySize: {
+                totalKB: Number((sizes.total / 1024).toFixed(1)),
+                fileCount: sizes.fileCount,
+                oversized: sizes.oversized,
+            },
+        },
+    }, null, 2))
 }
 
 function listMarkdownFiles(dir) {
@@ -816,6 +985,13 @@ function hasHistoryContext(lines, index) {
     return contextWords.some((word) => context.includes(word))
 }
 
+/** changelog 关键词豁免：否定/指令语境（"不要写本次改了什么"）或关键词被引号包裹（作为反例引用）时不算噪音 */
+function isChangelogException(line, keyword) {
+    if (/不要|不应|不得|禁止|别[写记把]|勿|避免/.test(line)) return true
+    const quoted = [`"${keyword}"`, `“${keyword}”`, `「${keyword}」`, `'${keyword}'`]
+    return quoted.some((q) => line.includes(q))
+}
+
 /**
  * 子命令：递归扫描 `.memory/` 下的 Markdown 文件中未标注历史语境的旧路径。
  *
@@ -835,6 +1011,19 @@ function commandLintMemory() {
                 if (hasHistoryContext(lines, index)) continue
 
                 hits.push({
+                    kind: 'stale-path',
+                    file: normalizePath(file),
+                    line: index + 1,
+                    lineContent,
+                    pattern,
+                })
+            }
+            // v4：changelog 式噪音（"本次改了什么"）本就不该进长期记忆，命中即判失败，无历史语境豁免
+            for (const pattern of CONFIG.lintChangelogPatterns) {
+                if (!lineContent.includes(pattern)) continue
+                if (isChangelogException(lineContent, pattern)) continue
+                hits.push({
+                    kind: 'changelog',
                     file: normalizePath(file),
                     line: index + 1,
                     lineContent,
@@ -845,13 +1034,15 @@ function commandLintMemory() {
     }
 
     const ok = hits.length === 0
+    const staleCount = hits.filter((h) => h.kind === 'stale-path').length
+    const changelogCount = hits.filter((h) => h.kind === 'changelog').length
     process.stdout.write(JSON.stringify({
         ok,
         total_files: files.length,
         hits,
         message: ok
-            ? '未发现未标注历史语境的旧路径'
-            : `发现 ${hits.length} 处疑似未标注历史语境的旧路径`,
+            ? '未发现旧路径或 changelog 噪音'
+            : `发现 ${staleCount} 处疑似未标注历史语境的旧路径 + ${changelogCount} 处 changelog 式噪音`,
     }, null, 2))
     process.exit(ok ? 0 : 1)
 }
@@ -885,17 +1076,40 @@ function main() {
     const deltaFiles = computeDelta(state.baselineFingerprint, currentFp.files)
     if (deltaFiles.length === 0 && !force) return
 
+    // ── v4 分支感知 + 时间衰减 + 跨成员去重（全程代码判断，零 AI）──
+    const meta = readMemMeta()
+    const branch = currentBranch()
+    // 上次维护时间优先取入库锚点（团队共享），回退单机 state
+    const lastMaintainedIso = meta?.updatedAt || state.lastMaintainedAt
+    const days = daysSince(lastMaintainedIso)
+    const factor = decayFactor(days)
+
+    // 跨成员去重：当前分支 HEAD 已被锚点标记为已维护、且工作区无新增量 → 别人已维护过，跳过
+    const maintainedHead = meta?.lastMaintained?.[branch]
+    if (!force && maintainedHead && maintainedHead === head && deltaFiles.length === 0) return
+
+    // 时间衰减后的有效阈值（factor=0 时阈值归零：有相关变更即过门槛，对应 >14 天兜底）
+    const fileThreshold = Math.ceil(CONFIG.deltaFileThreshold * factor)
+    const lineThreshold = Math.ceil(CONFIG.deltaLineThreshold * factor)
+    const aheadThreshold = Math.ceil(CONFIG.branchAheadThreshold * factor)
+
     const deltaLines = countLinesAgainstHead(deltaFiles)
+    const integration = resolveIntegrationBranch()
+    const aheadCount = branchAheadCount(integration)
     const touchesCoreConfig = deltaFiles.some((p) =>
         CORE_CONFIG_PATTERNS.some((re) => re.test(p)))
     const touchesArchitecture = deltaFiles.some((p) =>
         ARCHITECTURE_PATTERNS.some((re) => re.test(p)))
 
     const reasons = []
-    if (deltaFiles.length >= CONFIG.deltaFileThreshold)
-        reasons.push(`自上次维护以来变更文件数 ${deltaFiles.length} ≥ ${CONFIG.deltaFileThreshold}`)
-    if (deltaLines >= CONFIG.deltaLineThreshold)
-        reasons.push(`自上次维护以来变更行数 ${deltaLines} ≥ ${CONFIG.deltaLineThreshold}`)
+    if (deltaFiles.length >= fileThreshold)
+        reasons.push(`自上次维护以来变更文件数 ${deltaFiles.length} ≥ ${fileThreshold}（距上次 ${days.toFixed(1)} 天，衰减×${factor}）`)
+    if (deltaLines >= lineThreshold)
+        reasons.push(`自上次维护以来变更行数 ${deltaLines} ≥ ${lineThreshold}（衰减×${factor}）`)
+    if (integration && aheadThreshold > 0 && aheadCount >= aheadThreshold)
+        reasons.push(`当前分支 ${branch} 领先集成线 ${integration} ${aheadCount} commit ≥ ${aheadThreshold}`)
+    if (days > CONFIG.staleMaintenanceDays)
+        reasons.push(`距上次维护 ${days.toFixed(0)} 天 > ${CONFIG.staleMaintenanceDays} 天（长期未维护兜底）`)
     if (touchesCoreConfig) reasons.push('触及核心配置（依赖 / TS / 构建）')
     if (touchesArchitecture) reasons.push(`触及架构敏感区（preset: ${SELECTED_PRESET}）`)
 
@@ -916,7 +1130,7 @@ function main() {
         lastTriggeredAt: new Date().toISOString(),
     })
 
-    emitFollowup(buildMessage({ deltaFiles, reasons }))
+    emitFollowup(buildMessage({ deltaFiles, reasons, sizeInfo: computeMemorySizes() }))
 }
 
 main()
@@ -1035,8 +1249,22 @@ hooks = true
 .memory/
   项目总览.md          ← "项目总览" + "由子 Agent 在足够大的变更后自动沉淀"
   术语表.md            ← "术语表"
-  跨分支在研功能地图.md ← "跨分支在研功能地图" + "记录各分支在迭代的功能：功能→分支→状态"
+  跨分支在研功能地图.md ← v4 团队共享维护元数据载体（骨架见下方，含机读锚点 + 负责人列）
   待确认问题.md        ← "待确认问题" + "子 Agent 把不确定内容写此处，由人审定"
+```
+
+其中 **`跨分支在研功能地图.md` 是 v4 团队共享维护元数据载体**，不留空，按下面骨架建（人读表格 + 机读锚点共处一文件）：
+
+```markdown
+# 跨分支在研功能地图
+<!-- mem-meta: {"lastMaintained":{},"updatedAt":null,"by":null} -->
+
+> 记录各分支在迭代的功能：功能 → 分支 → 负责人 → 状态。
+> 人读表格由 project-memory-maintainer 维护；机读锚点 `<!-- mem-meta -->` 由 hook `--mark-done` 自动写（who/when/branch/head），**勿手改**。
+
+| 功能 | 分支 | 负责人 | 状态 | 上次维护 |
+|---|---|---|---|---|
+| （示例占位）权限重构 | feat-x | moxue | 进行中 | 2026-06-02 |
 ```
 
 不要创建任何业务模块目录——那由子 Agent 首次实际维护时按项目代码自动生成。
@@ -1081,9 +1309,9 @@ codegraph 自带**跨工具安装器**，会自动识别 Cursor / Claude Code / 
 - `codegraph init -i` 即使失败也不重试，交给用户 / 宪法第 4 条的自愈规则。
 - 语言不被 codegraph 支持时，init 仍会成功但索引为空——AI 查不到自然走 grep/read，是预期降级，不算错误。
 
-### 强制 + 兜底（你选定的策略）
+### 强制 + 兜底（v4 强化）
 
-codegraph 是记忆系统的**结构层必需组件**，默认强力安装；但**装不上不阻塞工作**：
+codegraph 在 v4 里**不再只是主 Agent 的可选结构层，而是维护子 Agent 自检路径/符号的依赖**——所以安装更强、更主动；但**装不上仍不阻塞工作**（子 Agent 自检回退 git cat-file/Glob、主 Agent 结构查询回退 grep/read）。另在 `CODEGRAPH_STATE=missing/no_node` 时，于收尾摘要把"codegraph 未就绪"列为**显著待办**（团队每位成员本地都需装，`.codegraph/` 不入库）。下面状态写法不变：
 
 - 成功（`ready` / `init_done`）→ 宪法的"codegraph 当前状态"块写"已就绪"。
 - 失败（`install_failed` / `init_failed` / `no_node`）→ 宪法的"codegraph 当前状态"块写降级提示：AI 结构查询回退 grep/read，并提示用户手动 `npx @colbymchenry/codegraph`。
@@ -1134,7 +1362,7 @@ alwaysApply: true
 - 不要互相侵入：纯结构别写进 `.memory`，业务语义别指望 codegraph。
 
 ## 4. codegraph 是必需组件（缺失则自愈安装）
-需要结构查询但 `codegraph_*` 不可用（未注册 / 未安装 / 索引未建）时：
+codegraph 不仅供主 Agent 做结构查询，**v4 起也是维护子 Agent 自检路径/符号的依赖**。需要结构查询、或维护子 Agent 自检，但 `codegraph_*` 不可用（未注册 / 未安装 / 索引未建）时：
 1. 先告知用户：「正在安装记忆系统必需组件 codegraph，请稍候」。
 2. 运行 `npx @colbymchenry/codegraph`（自动识别并配置当前工具）+ `codegraph init -i` 建索引，提示重启使 MCP 生效。
 3. 装失败（无 node / 无网络 / 受限机器）→ 降级到 grep / read，并明确告诉用户"codegraph 没装上，结构查询暂用原生搜索，可手动 `npx @colbymchenry/codegraph`"，**不阻塞当前工作**。
@@ -1175,7 +1403,7 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 产物全部就位后，向用户输出一段简短摘要（路径按宿主工具替换）：
 
 ```text
-项目记忆维护体系部署完成（v3：跨工具 + 与 codegraph 分工）：
+项目记忆维护体系部署完成（v4：团队级 + 与 codegraph 分工）：
 - 宿主工具: <cursor | claude-code | codex>
 - 选定 preset: <name>
 - 维护子 Agent（已按工具推荐模型: Cursor=inherit / Claude=sonnet / Codex=gpt-5.4-mini）
@@ -1188,7 +1416,8 @@ node .cursor/hooks/memory-precheck.mjs --mark-done
 分工说明：
 - .memory 专注业务领域：术语、模块语义、跨模块协作契约、设计决策、红线、已知风险、放哪/复用
 - codegraph 专注代码结构：符号位置、调用链、影响半径（缺失时按宪法第4条自愈安装，装不上则降级 grep/read）
-- 子 Agent 维护 .memory 时不调用 codegraph，保证调用最少 + codegraph 不可用时仍完整运行
+- 子 Agent 维护主体不调用 codegraph；仅自检路径/符号时用 codegraph_search（装不上回退 git cat-file/Glob），保证调用少 + 不可用时仍完整运行
+- 团队级（v4）：hook 分支感知触发 + 时间衰减 + 跨成员去重（零 AI）；维护元数据入库共享（跨分支地图的机读锚点 + 人读表格）；记忆防膨胀（H 写入黑名单事前拦 + G 增量去冗余事后删 + 体积信号）
 
 codegraph 当前状态: <CODEGRAPH_STATUS>
   ready / init_done    → 已就绪，AI 按宪法分工路由
@@ -1196,17 +1425,19 @@ codegraph 当前状态: <CODEGRAPH_STATUS>
   init_failed          → codegraph init -i 失败（错误: <error>），宪法已写降级提示
   no_node              → 缺少 Node 工具链，宪法已写降级提示
 
-触发节奏（默认值）：
-- 自上次维护以来变更文件数 ≥ 5，或变更行数 ≥ 200，或触及核心配置 / 架构敏感区
+触发节奏（v4：分支感知 + 时间衰减，全程代码判断零 AI）：
+- 基础阈值：变更文件数 ≥ 5、行数 ≥ 200、触及核心配置 / 架构敏感区、或当前分支领先集成线 ≥ 10 commit
+- 时间衰减门槛：距上次维护 <2天 阈值×1.5、2-7天 ×1.0、>7天 ×0.5、>14天 有相关变更即触发
+- 跨成员去重：当前分支 HEAD 已被入库锚点记为已维护则跳过（团队 pull 即共享上次维护点）
 - 同一冷却期内（默认 30 分钟）只提示一次；工作区指纹未变则跳过
-- 调阈值/冷却改 memory-precheck.mjs 顶部 CONFIG
+- 调阈值/衰减/集成线候选改 memory-precheck.mjs 顶部 CONFIG
 
 日常运维命令（路径按宿主替换）：
 - node .cursor/hooks/memory-precheck.mjs --mark-done   维护完成 / 判 no-op 后刷新基线
 - node .cursor/hooks/memory-precheck.mjs --force       绕过冷却与去重，强制提示一次
-- node .cursor/hooks/memory-precheck.mjs --status      打印 CONFIG 与状态
+- node .cursor/hooks/memory-precheck.mjs --status      打印 CONFIG + 状态 + v4（当前分支 / 领先提交数 / 上次维护时间 / 衰减因子 / 记忆体积）
 - node .cursor/hooks/memory-precheck.mjs --reset       清空 hook 状态
-- node .cursor/hooks/memory-precheck.mjs --lint-memory 扫描 .memory 中未标注历史语境的旧路径
+- node .cursor/hooks/memory-precheck.mjs --lint-memory 扫描 .memory 旧路径 + v4 changelog 式噪音
 
 接下来：
 - 下一次较大代码变更结束时，hook 自动检测并提示（Codex 需显式唤起子 Agent）。
