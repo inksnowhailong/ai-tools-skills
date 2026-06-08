@@ -670,7 +670,7 @@ function parseStatusPaths(status) {
 }
 
 /**
- * 计算工作区中相关文件的指纹。
+ * 计算 worktree 相关文件的 mtime 指纹哈希（用于 trigger dedup）。
  * 用 path:size:mtime 而非 git diff，原因：未提交时 diff 一直在变，
  * 但只要文件 size 与 mtime 不变就不应判定为"又有新变更"。
  */
@@ -685,47 +685,34 @@ function computeWorktreeFingerprint(paths) {
         }
     }
     items.sort()
-    return {
-        files: items,
-        hash: createHash('sha1').update(items.join('\n')).digest('hex').slice(0, 16),
-    }
+    return createHash('sha1').update(items.join('\n')).digest('hex').slice(0, 16)
 }
 
-/** 找出当前工作区中相对基线"新增或元数据变化"的文件路径 */
-function computeDelta(baselineFiles, currentFiles) {
-    const baselineMap = new Map()
-    for (const item of baselineFiles || []) {
-        const idx = item.indexOf('|')
-        if (idx === -1) continue
-        baselineMap.set(item.slice(0, idx), item.slice(idx + 1))
-    }
-    const newOrChanged = []
-    for (const item of currentFiles) {
-        const idx = item.indexOf('|')
-        if (idx === -1) continue
-        const path = item.slice(0, idx)
-        const meta = item.slice(idx + 1)
-        const baselineMeta = baselineMap.get(path)
-        if (baselineMeta === undefined || baselineMeta !== meta) {
-            newOrChanged.push(path)
-        }
-    }
-    return newOrChanged
+/** 解析 git diff --name-only 输出为路径数组 */
+function parseDiffPaths(output) {
+    if (!output) return []
+    return output.split('\n').map((l) => normalizePath(l.trim())).filter(Boolean)
 }
 
-/** 仅作为辅助信号：deltaFiles 相对 HEAD 的总变更行数 */
-function countLinesAgainstHead(paths) {
-    if (paths.length === 0) return 0
-    const numstat = runGit(['diff', '--numstat', 'HEAD', '--', ...paths])
+function parseNumstat(numstat) {
     if (!numstat) return 0
     return numstat.split('\n').reduce((total, line) => {
         const [a, d] = line.split(/\s+/)
-        const safe = (s) => {
-            const n = Number.parseInt(s, 10)
-            return Number.isFinite(n) ? n : 0
-        }
+        const safe = (s) => { const n = Number.parseInt(s, 10); return Number.isFinite(n) ? n : 0 }
         return total + safe(a) + safe(d)
     }, 0)
+}
+
+/** worktree 相对 HEAD 的变更行数 */
+function countLinesAgainstHead(paths) {
+    if (paths.length === 0) return 0
+    return parseNumstat(runGit(['diff', '--numstat', 'HEAD', '--', ...paths]))
+}
+
+/** fromRef..toRef 之间相关文件的变更行数（用于已提交变更统计） */
+function countLinesBetween(paths, fromRef, toRef) {
+    if (paths.length === 0 || !fromRef || fromRef === toRef) return 0
+    return parseNumstat(runGit(['diff', '--numstat', fromRef, toRef, '--', ...paths]))
 }
 
 function readState(file) {
@@ -886,37 +873,31 @@ function buildMessage({ deltaFiles, reasons, sizeInfo }) {
     ].join('\n')
 }
 
-/** 子命令：把当前工作区作为新基线落盘，下次 hook 仅检查相对基线的新增量 */
+/** 子命令：把当前 HEAD 记为新基线，下次 hook 仅检查相对此 HEAD 的已提交变更 + 工作区 WIP */
 function commandMarkDone(stateFile) {
     if (!inGitRepo()) {
         process.stdout.write(JSON.stringify({ ok: false, message: '当前不在 git 仓库内' }))
         return
     }
-    const allRelevant = Array.from(
-        new Set(parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)),
-    )
-    const fp = computeWorktreeFingerprint(allRelevant)
     const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
     const branch = currentBranch()
     const by = runGit(['config', 'user.name']) || 'unknown'
     const nowIso = new Date().toISOString()
     const prev = readState(stateFile)
     writeState(stateFile, {
-        ...prev,
         baselineHead: head,
-        baselineFingerprint: fp.files,
-        baselineHash: fp.hash,
         lastMaintainedAt: nowIso,
         lastTriggerHash: null,
+        // 保留历史字段供 --status 可读
+        ...(prev.lastTriggeredAt ? { lastTriggeredAt: prev.lastTriggeredAt } : {}),
     })
     // v4：把"谁/何时/在哪个分支维护到哪个 commit"写进入库的机读锚点，供团队跨成员去重 + 时间衰减判断。
-    // 合并现有锚点，只更新当前分支这一项，保留其他分支的已维护记录。
     const prevMeta = readMemMeta() || {}
     const lastMaintained = { ...(prevMeta.lastMaintained || {}), [branch]: head }
     writeMemMetaIntoMap({ lastMaintained, updatedAt: nowIso, by, branch })
     process.stdout.write(JSON.stringify({
         ok: true,
-        message: `已刷新记忆维护基线（分支 ${branch} @ ${head.slice(0, 8)}，维护者 ${by}），纳入 ${allRelevant.length} 个相关文件`,
+        message: `已刷新记忆维护基线（分支 ${branch} @ ${head.slice(0, 8)}，维护者 ${by}）`,
     }))
 }
 
@@ -1060,21 +1041,30 @@ function main() {
 
     if (!inGitRepo()) return
 
-    const allRelevant = Array.from(
-        new Set(parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)),
-    )
+    const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
+    const state = readState(stateFile)
+
+    // ── Option C：committed diff + worktree 双轨 ──
+    // 1. 已提交但未入基线的相关文件（baselineHead → HEAD）
+    const committedPaths = state.baselineHead && state.baselineHead !== head
+        ? parseDiffPaths(runGit(['diff', '--name-only', state.baselineHead, head, '--'])).filter(isRelevant)
+        : []
+
+    // 2. 未提交的 WIP 相关文件
+    const worktreePaths = parseStatusPaths(runGit(['status', '--porcelain'])).filter(isRelevant)
+
+    // 3. 合并去重；工作区干净且 HEAD 未前进时直接跳过
+    const allRelevant = Array.from(new Set([...committedPaths, ...worktreePaths]))
     if (allRelevant.length === 0) return
 
-    const state = readState(stateFile)
-    const head = runGit(['rev-parse', 'HEAD']) || 'no-head'
-    const currentFp = computeWorktreeFingerprint(allRelevant)
+    // 4. Trigger dedup：HEAD + worktree 指纹组合哈希，相同状态不重复触发
+    const worktreeFpHash = computeWorktreeFingerprint(worktreePaths)
+    const triggerSignature = createHash('sha1')
+        .update(`${head}|${worktreeFpHash}`)
+        .digest('hex').slice(0, 16)
 
-    if (CONFIG.requireHeadAdvance && state.baselineHead === head && !force) return
-    if (!force && currentFp.hash === state.lastTriggerHash) return
+    if (!force && triggerSignature === state.lastTriggerHash) return
     if (!force && minutesSince(state.lastTriggeredAt) < CONFIG.cooldownMinutes) return
-
-    const deltaFiles = computeDelta(state.baselineFingerprint, currentFp.files)
-    if (deltaFiles.length === 0 && !force) return
 
     // ── v4 分支感知 + 时间衰减 + 跨成员去重（全程代码判断，零 AI）──
     const meta = readMemMeta()
@@ -1084,16 +1074,20 @@ function main() {
     const days = daysSince(lastMaintainedIso)
     const factor = decayFactor(days)
 
-    // 跨成员去重：当前分支 HEAD 已被锚点标记为已维护、且工作区无新增量 → 别人已维护过，跳过
+    // 跨成员去重：当前分支 HEAD 已被锚点标记为已维护、且两轨均无新增量 → 别人已维护过，跳过
     const maintainedHead = meta?.lastMaintained?.[branch]
-    if (!force && maintainedHead && maintainedHead === head && deltaFiles.length === 0) return
+    if (!force && maintainedHead && maintainedHead === head && committedPaths.length === 0 && worktreePaths.length === 0) return
 
     // 时间衰减后的有效阈值（factor=0 时阈值归零：有相关变更即过门槛，对应 >14 天兜底）
     const fileThreshold = Math.ceil(CONFIG.deltaFileThreshold * factor)
     const lineThreshold = Math.ceil(CONFIG.deltaLineThreshold * factor)
     const aheadThreshold = Math.ceil(CONFIG.branchAheadThreshold * factor)
 
-    const deltaLines = countLinesAgainstHead(deltaFiles)
+    const deltaFiles = allRelevant
+    // committed 行数从 baselineHead diff HEAD 取；worktree 行数从 diff HEAD 取
+    const committedLines = countLinesBetween(committedPaths, state.baselineHead, head)
+    const worktreeLines = countLinesAgainstHead(worktreePaths)
+    const deltaLines = committedLines + worktreeLines
     const integration = resolveIntegrationBranch()
     const aheadCount = branchAheadCount(integration)
     const touchesCoreConfig = deltaFiles.some((p) =>
@@ -1124,9 +1118,7 @@ function main() {
     writeState(stateFile, {
         ...state,
         baselineHead: state.baselineHead || head,
-        baselineFingerprint: state.baselineFingerprint || [],
-        baselineHash: state.baselineHash || null,
-        lastTriggerHash: currentFp.hash,
+        lastTriggerHash: triggerSignature,
         lastTriggeredAt: new Date().toISOString(),
     })
 
