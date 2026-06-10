@@ -1,6 +1,6 @@
 ---
 name: tvs-team-spawn
-description: 一次性为当前项目构建多 Agent 团队协作系统。通过对话收集团队规模与目标，从 19 个核心角色中推荐配比，生成 leader / sub skill、邮箱（maildir 模式）、黑板（单写多读）、stop hook（按事件唤醒）；worktree 由 leader 在工作中按需建立。当用户提到"建一个团队 / 多 agent 协作 / 主从 chat / sub agent / leader 编排 / 邮箱通信 / 团队 chat / 团队工作流"等需求时使用。
+description: 当用户提到"建一个团队、多 agent 协作、主从 chat、sub agent、leader 编排、邮箱通信、团队 chat、团队工作流"时使用。作用：对话收集团队规模与目标，从 19 个核心角色推荐配比，生成 leader/sub skill、maildir 邮箱、单写多读黑板、按事件唤醒的 stop hook；worktree 由 leader 按需建立。
 ---
 
 # tvs-team-spawn：多 Agent 团队构建

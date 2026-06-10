@@ -1,6 +1,6 @@
 ---
 name: tvs-cc-migrator
-description: Claude Code 配置迁移工具。备份和恢复 ~/.claude/ 下的所有配置（CLAUDE.md、rules、skills、commands、agents、自定义插件、settings.json 等）。当用户提到备份配置、迁移 Claude Code、导出设置、恢复配置、换电脑等场景时使用此 skill。
+description: 当用户提到备份配置、迁移 Claude Code、导出/恢复设置、换电脑、同步 ~/.claude 配置时使用。作用：备份和恢复 ~/.claude/ 下全部配置（CLAUDE.md、rules、skills、commands、agents、自定义插件、settings.json 等）。
 ---
 
 # CC Migrator — Claude Code 配置迁移

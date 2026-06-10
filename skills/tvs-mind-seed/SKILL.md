@@ -1,6 +1,6 @@
 ---
 name: tvs-mind-seed
-description: 为单个 agent 一次性初始化私有记忆系统（精简三件套 identity / memory-active / memory-raw；identity 合并了旧 profile+personality）。通过对话引导收集角色定位、关注点、沟通风格、边界，生成 JSON 写入。chat 崩溃后再开同一个 chat 可读回。适用于：tvs-team-spawn 部署完团队后每个成员的记忆初始化，或为独立 chat 建立可恢复的记忆体系。
+description: 当用户要为某个 agent/chat 初始化私有记忆（初始化记忆、mind seed、给成员建记忆），或 tvs-team-spawn 部署完团队后为成员建记忆时使用。作用：对话引导收集角色定位、关注点、沟通风格、边界，生成精简三件套（identity/memory-active/memory-raw）JSON；chat 崩溃后再开可读回恢复。
 ---
 
 # tvs-mind-seed：单 Agent 记忆初始化
