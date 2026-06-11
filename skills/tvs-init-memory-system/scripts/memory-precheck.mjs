@@ -29,7 +29,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
 // preset: <选定的 preset 名>
@@ -105,13 +105,12 @@ const PRESET_REGISTRY = {
     },
 }
 
-const SELECTED_PRESET_CONFIG = PRESET_REGISTRY[SELECTED_PRESET]
-if (!SELECTED_PRESET_CONFIG) {
-    throw new Error(`未知 memory preset: ${SELECTED_PRESET}`)
-}
+// v5：preset 未注入只影响"触发检测"主路径；--lint-memory / --mark-done / --status / --reset 与 preset 无关，不应被挡。
+// 校验下沉到 main() 的触发分支（见下），模块加载不再抛错。
+const SELECTED_PRESET_CONFIG = PRESET_REGISTRY[SELECTED_PRESET] || null
 
 /** 视为代码或架构相关变化的路径，至少命中一条才纳入考量 */
-const INCLUDE_PATTERNS = SELECTED_PRESET_CONFIG.include
+const INCLUDE_PATTERNS = SELECTED_PRESET_CONFIG?.include ?? []
 
 /** 即使命中 include 也强制排除；所有 preset 共享 */
 const EXCLUDE_PATTERNS = [
@@ -123,10 +122,10 @@ const EXCLUDE_PATTERNS = [
 ]
 
 /** 命中即视为触及核心配置，自动提升优先级 */
-const CORE_CONFIG_PATTERNS = SELECTED_PRESET_CONFIG.coreConfig
+const CORE_CONFIG_PATTERNS = SELECTED_PRESET_CONFIG?.coreConfig ?? []
 
 /** 命中即视为架构敏感区域，自动提升优先级 */
-const ARCHITECTURE_PATTERNS = SELECTED_PRESET_CONFIG.architecture
+const ARCHITECTURE_PATTERNS = SELECTED_PRESET_CONFIG?.architecture ?? []
 
 /** 触发阈值与节流配置，按项目实际节奏调整 */
 const CONFIG = {
@@ -139,6 +138,8 @@ const CONFIG = {
     /** 是否要求 HEAD 前进（commit 之后）才计入触发分数；默认关闭 */
     requireHeadAdvance: false,
     // ── v4 团队化配置 ──
+    /** v5/P3：团队模式。false = 单人项目，--mark-done 只写本机 state，不往入库的跨分支地图写机读锚点（避免无意义 git diff） */
+    teamMode: true,
     /** 集成线候选；探测时取第一个本地存在的分支作为"集成线"，用于算分支领先提交数 */
     integrationBranchCandidates: ['dev', 'develop', 'main', 'master'],
     /** 当前分支领先集成线的提交数 ≥ 此值即独立触发（攒了不少活该维护了；会被时间衰减缩放） */
@@ -147,8 +148,10 @@ const CONFIG = {
     staleMaintenanceDays: 14,
     /** 单个 .memory md 文件软上限（字节）；超过即在提示里追加"该文件膨胀了考虑精简" */
     memoryFileSoftLimitBytes: 8192,
-    /** .memory md 总量软上限（字节）；超过即在提示里追加整体精简建议 */
-    memoryTotalSoftLimitBytes: 102400,
+    /** .memory md 总量软上限（字节）；v5 账本模型收紧到 32KB（只存不可推导知识，超了说明混进了可推导内容） */
+    memoryTotalSoftLimitBytes: 32768,
+    /** v5：lint 超龄复审——文件超过此天数未更新即标记"提请复审"（实时性兜底） */
+    lintStaleFileDays: 180,
     /** 旧路径占位；真实旧路径每个项目特定，请按项目情况补进 */
     lintMemoryStalePathPatterns: [
         'src/legacy/',
@@ -370,17 +373,15 @@ function buildMessage({ deltaFiles, reasons, sizeInfo }) {
         '记忆维护要求：',
         '- `.memory/**` 写入必须在 `project-memory-maintainer` 后台子 Agent 内完成，主 Agent 禁止直接编辑 `.memory/**`。',
         '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
-        '- 只记录项目稳定情况、模块边界、数据契约、工程风格、复用入口和已知风险。',
-        '- 不要记录本次改了什么，不要把 `.memory` 写成 changelog。',
-        '- 写入黑名单（严格挡在 .memory 外）：代码注释/JSDoc 转述、临时进度/TODO、低复用价值的过度细节、函数签名/参数/返回值、纯文件路径定位——这些查 codegraph 或源码，不进记忆。',
-        '- 维护某模块时顺手删掉该模块档案里 codegraph 已能回答的存量结构冗余（增量去冗余，别全量扫）。',
-        '- 来源标注降为模块级：标到"本模块"即可，不必每条堆具体文件/行。',
+        '- v5 账本模型：只维护四类不可推导知识——业务导航（术语↔入口）、决策日志（append-only，为什么）、红线与约定、跨分支地图。',
+        '- 写入黑名单：模块职责描述、业务流程叙述、数据契约、函数签名/参数、调用关系、纯路径罗列（无业务词锚定）、代码注释转述、临时进度/TODO、changelog 式"本次改了什么"——可推导内容查 codegraph 或源码，不进记忆。',
+        '- 本轮若没有新决策、新红线、导航变化（新能力/新叫法/入口迁移），直接 no-op——这是预期常态，不要硬写。',
         '- 维护后同步更新本文件（跨分支在研功能地图.md）的人读表格：功能 / 分支 / 负责人（git user.name）/ 状态 / 上次维护。',
         '',
         'mark-done 质量闸门：',
         '- 维护完成后，先输出自检摘要：本次更新文件清单、反查过的源码路径、发现并处理的过期路径、未能确认的问题。',
         '- 未能确认的问题应写入 `待确认问题.md`，不能混入模块档案伪造成当前事实。',
-        '- 如果路径不存在但被作为当前事实保留、来源标注无法在源码中找到对应文件、或模块文档只有浅描述且不达最低质量门，禁止执行 `--mark-done`。',
+        '- 如果代码入口路径在集成线不存在却被当作当前事实保留，或决策日志的历史条目正文被改写（只允许追加和状态行修订），禁止执行 `--mark-done`。',
         '- 禁止刷新基线时，应把未解决问题写入 `待确认问题.md`，或通过回执返回 blocked。',
         '- 通过自检后再执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
         '',
@@ -423,9 +424,12 @@ function commandMarkDone(stateFile) {
         ...(prev.lastTriggeredAt ? { lastTriggeredAt: prev.lastTriggeredAt } : {}),
     })
     // v4：把"谁/何时/在哪个分支维护到哪个 commit"写进入库的机读锚点，供团队跨成员去重 + 时间衰减判断。
-    const prevMeta = readMemMeta() || {}
-    const lastMaintained = { ...(prevMeta.lastMaintained || {}), [branch]: head }
-    writeMemMetaIntoMap({ lastMaintained, updatedAt: nowIso, by, branch })
+    // v5/P3：单人模式（teamMode: false）跳过——锚点入库只在多人共享时有意义，单人写它只产生 git diff 噪音。
+    if (CONFIG.teamMode) {
+        const prevMeta = readMemMeta() || {}
+        const lastMaintained = { ...(prevMeta.lastMaintained || {}), [branch]: head }
+        writeMemMetaIntoMap({ lastMaintained, updatedAt: nowIso, by, branch })
+    }
     process.stdout.write(JSON.stringify({
         ok: true,
         message: `已刷新记忆维护基线（分支 ${branch} @ ${head.slice(0, 8)}，维护者 ${by}）`,
@@ -545,16 +549,52 @@ function commandLintMemory() {
         })
     }
 
+    // ── v5 健康检查（借鉴 omc wiki lint）：孤儿文件 / 互链断裂 / 超龄复审 ──
+    const indexText = (() => {
+        const f = resolve(memoryRoot, '记忆索引.md')
+        return existsSync(f) ? readFileSync(f, 'utf8') : ''
+    })()
+    const pageNames = new Set(files.map((f) => basename(f, '.md')))
+    const now = Date.now()
+    for (const file of files) {
+        const name = basename(file, '.md')
+        // 孤儿：记忆索引完全没提到的页面（索引自己和个人偏好豁免）
+        if (indexText && name !== '记忆索引' && name !== '个人偏好' && !indexText.includes(name)) {
+            hits.push({ kind: 'orphan-file', file: normalizePath(file), line: 0, lineContent: '', pattern: '记忆索引未引用' })
+        }
+        // 断链：[[页面]] 互链指向不存在的页面
+        const text = readFileSync(file, 'utf8')
+        for (const m of text.matchAll(/\[\[([^\]\r\n]+)\]\]/g)) {
+            if (!pageNames.has(m[1])) {
+                hits.push({ kind: 'broken-link', file: normalizePath(file), line: 0, lineContent: m[0], pattern: m[1] })
+            }
+        }
+        // 超龄复审：长期未更新的页面提请人工复审（实时性兜底，不自动判错）
+        try {
+            const ageDays = (now - statSync(file).mtimeMs) / 86400000
+            if (ageDays > CONFIG.lintStaleFileDays) {
+                hits.push({ kind: 'stale-review', file: normalizePath(file), line: 0, lineContent: `${ageDays.toFixed(0)} 天未更新`, pattern: '提请复审' })
+            }
+        } catch { /* ignore */ }
+    }
+
     const ok = hits.length === 0
-    const staleCount = hits.filter((h) => h.kind === 'stale-path').length
-    const changelogCount = hits.filter((h) => h.kind === 'changelog').length
+    const counts = {}
+    for (const h of hits) counts[h.kind] = (counts[h.kind] || 0) + 1
     process.stdout.write(JSON.stringify({
         ok,
         total_files: files.length,
         hits,
         message: ok
-            ? '未发现旧路径或 changelog 噪音'
-            : `发现 ${staleCount} 处疑似未标注历史语境的旧路径 + ${changelogCount} 处 changelog 式噪音`,
+            ? '未发现旧路径、changelog 噪音、孤儿页、断链或超龄页'
+            : '发现问题：' + Object.entries(counts).map(([k, v]) => `${k}×${v}`).join('，'),
+        // v5/P1 衡量回路：写而不读的记忆是负债——每次 lint 顺便自问，三问皆否就该精简而不是扩充
+        review: [
+            'P1 衡量三问：',
+            '1. 最近一个月 AI 放错过代码位置吗？',
+            '2. 最近一个月 AI 重复造过轮子吗？',
+            '3. 你自己上次查 .memory 是什么时候？',
+        ],
     }, null, 2))
     process.exit(ok ? 0 : 1)
 }
@@ -567,6 +607,12 @@ function main() {
     if (argv.includes('--reset')) return commandReset(stateFile)
     if (argv.includes('--status')) return commandStatus(stateFile)
     if (argv.includes('--lint-memory')) return commandLintMemory()
+
+    // 触发检测主路径才需要 preset；未注入时跳过并提示（安装脚本忘了替换占位）
+    if (!SELECTED_PRESET_CONFIG) {
+        process.stderr.write(`[memory-hook] 未注入 preset（SELECTED_PRESET=${SELECTED_PRESET}），触发检测跳过。请按安装步骤替换脚本顶部占位。\n`)
+        return
+    }
 
     const force = argv.includes('--force')
 
