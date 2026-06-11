@@ -30,8 +30,9 @@ AIConfig/
 │   ├── tvs-inksnow-arch/
 │   ├── tvs-mind-seed/
 │   ├── tvs-pullread/
-│   ├── tvs-team-spawn/
-│   └── tvs-verify/
+│   ├── tvs-setup/
+│   ├── tvs-task/
+│   └── tvs-team-spawn/
 ├── rules/
 │   ├── coding-rules.md
 │   ├── role.md
@@ -40,9 +41,28 @@ AIConfig/
     └── hooks.json
 ```
 
-## 一键安装 Prompt
+## 安装
 
-把下面这段话复制给当前 AI 助手即可。现在的 AI 足够聪明，不需要把完整流程塞进 Prompt 里。
+### 方式一：脚本安装（Claude Code / Cursor 推荐）
+
+```bash
+git clone https://github.com/inksnowhailong/ai-tools-skills.git
+node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
+```
+
+默认以**软链**方式安装到所有检测到的宿主（仓库即真相，`git pull` 即更新，零漂移；Windows 用 junction，无需管理员）。装完后体检与生态建议：
+
+```bash
+node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs doctor   # 漂移/死引用/孤儿/frontmatter 体检
+node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs detect   # 含 omc / superpowers / codegraph 生态探测与安装建议
+node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs update --pull   # 检查并更新到最新版（软链安装即时生效）
+```
+
+之后在 AI 对话里说"tvs setup / 体检一下 skill"即可由 `tvs-setup` skill 接管日常维护。
+
+### 方式二：AI 一键安装 Prompt（其他工具 / 不想 clone）
+
+把下面这段话复制给当前 AI 助手即可：
 
 ```text
 请把这个仓库安装到你当前 AI 工具的用户级全局配置目录，并自动适配目录结构：
@@ -51,10 +71,11 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 
 要求：
 1. 先识别你自己是 Claude Code、Cursor、Codex、Cline、Aider、Continue 还是其他 AI 工具。
-2. 拉取或更新仓库，只把内容安装到用户全局目录，不要写入当前项目目录。
-3. 安装 skills、commands、rules、hooks 和全局指令文件；如果当前工具不支持某类能力，就转成它能读取的规则/命令文档，并说明。
+2. Claude Code / Cursor 优先运行仓库自带脚本：node <repo>/skills/tvs-setup/scripts/tvs.mjs install
+3. 其他工具：拉取仓库后只把内容安装到用户全局目录，不要写入当前项目目录；
+   工具不支持的能力转成它能读取的规则/命令文档，并说明。
 4. 覆盖前先备份用户已有同名文件。
-5. 完成后报告安装目录、安装了哪些 skill / command / rule，以及哪些内容因工具不支持被跳过。
+5. 完成后报告安装目录、安装了哪些 skill / rule，以及哪些内容因工具不支持被跳过。
 ```
 
 ## 适合的 AI 工具
@@ -84,7 +105,6 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 | `tvs-deep-interview` | 中文深度需求访谈，通过单问题追问、拓扑确认、歧义评分和审批闸门，把模糊想法变成规格。 | 用户需求不清、怕做错方向、需要先问清楚再实现。 | Cursor、Claude Code、Codex、Cline、Roo |
 | `tvs-clean-code` | 清理代码结构、命名、冗余和注释，让意图更清晰。 | 代码可读性差、函数太乱、需要补关键中文注释。 | Cursor、Claude Code、Codex、Cline |
 | `tvs-code-reviewer` | 稳定、证据驱动的代码审查，按固定通道找漏洞、坏味道和真实问题。 | 审当前 diff、审 PR、找 bug、找坏代码、毒舌审查。 | Cursor、Claude Code、Codex、Cline |
-| `tvs-verify` | 验证刚刚 AI 做的改动是否真的解决了用户原始问题。 | 用户问“刚才改好了吗”“确认是否完成”“看看是否真修好了”。 | Cursor、Claude Code、Codex、Cline |
 
 ### 协作、记忆与迁移
 
@@ -95,6 +115,8 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 | `tvs-init-memory-system` | 为当前项目一次性部署项目记忆维护体系，并配置 codegraph 分工路由。 | 明确要求部署项目记忆系统、初始化 `.memory`、安装记忆维护 hook。 | Cursor 专用 |
 | `tvs-cc-migrator` | Claude Code 配置备份与恢复工具。 | 换电脑、备份 `~/.claude`、迁移 rules/skills/commands/agents/settings。 | Claude Code 最佳；Cursor 可辅助迁移 |
 | `tvs-pullread` | 拉取并通读远程代码，帮助理解远程分支/PR 的真实实现。 | 读 PR、同步远端、理解别人改了什么、分析远程业务逻辑。 | Cursor、Claude Code、Codex |
+| `tvs-task` | 自然语言转结构化任务账本（`~/.tasklog/active.md`），支持迭代追加、git 合并检测、宽表渲染。 | 帮我记一下、下午要改xxx、任务表、上周做了啥、T-xxx 继续。 | Cursor、Claude Code、Codex、Cline |
+| `tvs-setup` | 本仓库的安装/更新/体检入口（软链优先、漂移检测、死引用扫描、孤儿清理），并探测 omc / superpowers / codegraph 生态给增强建议。 | tvs setup、体检一下 skill、装到新机器、skill 同步了吗。 | Claude Code、Cursor |
 
 ## Commands
 

@@ -1,9 +1,15 @@
 ---
 name: tvs-team-spawn
-description: 当用户提到"建一个团队、多 agent 协作、主从 chat、sub agent、leader 编排、邮箱通信、团队 chat、团队工作流"时使用。作用：对话收集团队规模与目标，从 19 个核心角色推荐配比，生成 leader/sub skill、maildir 邮箱、单写多读黑板、按事件唤醒的 stop hook；worktree 由 leader 按需建立。
+description: 当用户提到"建一个团队、多 agent 协作、主从 chat、sub agent、leader 编排、邮箱通信、团队 chat、团队工作流"时使用。定位：主战场是 Cursor（无原生多 agent 编排）；Claude Code 已有原生 teams，应先提示用户优先原生方案。作用：对话收集团队规模与目标，从 19 个核心角色推荐配比，生成 leader/sub skill、maildir 邮箱、单写多读黑板、按事件唤醒的 stop hook；worktree 由 leader 按需建立。
 ---
 
 # tvs-team-spawn：多 Agent 团队构建
+
+## 宿主定位（开始前先看这个）
+
+本 skill 的主战场是 **Cursor**——它没有原生多 agent 编排，本 skill 的文件邮箱 + stop hook 方案填的就是这个空。
+
+如果你运行在 **Claude Code**：先告知用户 Claude Code 已有原生 teams（TeamCreate / SendMessage / 命名 agent / 后台运行），通常比文件邮箱方案更稳、更省 token。只有当用户明确想要"跨 IDE 统一的团队协议"、或团队里混有 Cursor 成员时，才继续用本 skill 部署（`--target claude` 仍完整支持）。用户知情后选哪个都尊重。
 
 把当前项目装上一套"主从多 chat"协作系统。每个团队成员是一个独立 chat（leader 一个 + N 个 sub），通过文件邮箱通信，通过黑板共享上下文，通过 stop hook 在事件到来时自动唤醒。
 

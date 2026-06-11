@@ -120,15 +120,11 @@ _下个ID：T-{nnn}_
      - 完全匹配不到 → 告知用户没找到相关进行中任务，询问是否要新建
 
 3. **默认 git 核查**（有分支信息时自动执行，无需用户额外说）：
-   - 子代理对任务 `项目` 数组里每个仓库执行：
+   - 子代理对任务 `项目` 数组里每个仓库执行（祖先检测天然覆盖 feature→dev→main 的间接合并链：分支提交只要经任何路径进了主线，分支尖就是主线的祖先）：
      ```bash
-     cd {仓库路径} && git branch --merged main 2>/dev/null | grep {分支名} || git branch --merged master 2>/dev/null | grep {分支名}
+     cd {仓库路径} && (git merge-base --is-ancestor {分支名} main 2>/dev/null || git merge-base --is-ancestor {分支名} master 2>/dev/null) && echo merged
      ```
-   - 跨分支链（feature→dev→main/master）：直查不到时，检查间接合并链：
-     ```bash
-     git log main --merges --oneline | grep -i "dev"
-     git branch --merged main | grep dev
-     ```
+   - 注意：squash merge 会重写提交，祖先检测查不到——这正是下面"未查到合并 → 提示确认"兜底存在的原因，查不到不代表没合，交给用户确认。
    - 查到合并 → **从 active.md 删除该任务块**（完成即删，不留存档）
    - **未查到合并** → 提示"分支尚未合入主线，确认完成并删除？"，用户确认后再删
    - 无分支信息 → 跳过 git 核查，直接删除任务块

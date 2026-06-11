@@ -37,11 +37,11 @@ description: 项目架构初始化与重构一体 Skill。何时使用：用户�
 
 ## 第一步：检查 `tvs-deep-interview` skill 是否可用
 
-按以下顺序检查：
+按以下顺序检查（任一命中即视为已安装）：
 
-1. `Glob ~/.cursor/skills/tvs-deep-interview/SKILL.md`（用户级 skill 仓库）
-2. `Glob .cursor/skills/tvs-deep-interview/SKILL.md`（项目级 skill）
-3. 当前 Agent 环境的可用 skill 列表（如有元接口可查）
+1. 当前 Agent 环境的可用 skill 列表（最权威：Claude Code 的 available skills、Cursor 的 skill 面板等）
+2. Claude Code 路径：`Glob ~/.claude/skills/tvs-deep-interview/SKILL.md`（用户级）、`Glob .claude/skills/tvs-deep-interview/SKILL.md`（项目级）
+3. Cursor 路径：`Glob ~/.cursor/skills/tvs-deep-interview/SKILL.md`（用户级）、`Glob .cursor/skills/tvs-deep-interview/SKILL.md`（项目级）
 
 ### 情况 A：已安装
 
@@ -271,9 +271,21 @@ C. 暂停，先消化
 
 ---
 
-# 阶段 2：落地（生成 .cursor/rules/）
+# 阶段 2：落地（生成架构规则文件）
 
 **进入条件**：用户已在第四步选 A，明确批准 RFC。
+
+## 宿主落盘适配（先判定，再写盘）
+
+规则的**内容逻辑与宿主无关**，只有落盘容器不同。开始落地前先判定你运行在哪个宿主：
+
+| 宿主 | 规则落盘位置 | 生效方式 |
+|---|---|---|
+| Cursor | `.cursor/rules/*.mdc` | frontmatter `alwaysApply: true` |
+| Claude Code | `.claude/rules/*.md` | 在项目 `CLAUDE.md` 末尾追加 `@.claude/rules/<文件名>.md` 引入（CLAUDE.md 不存在则创建） |
+| 其他 / 判不准 | 问用户 | 不要猜 |
+
+下文出现的 `.cursor/rules/*.mdc` 均指「当前宿主对应的位置与格式」；Claude Code 下 `.md` 文件不需要 `alwaysApply` frontmatter，靠 CLAUDE.md 的 `@` 引用常驻生效。
 
 ## 第五步：扫描项目当前结构
 
