@@ -29,6 +29,7 @@ tvs-init-memory-system/
     ├── codegraph-provision.md        ← 产物5：codegraph 检测/安装/状态落盘
     ├── constitution.md               ← 产物6：记忆宪法正文（极小常驻规则）
     ├── closing-summary.md            ← 收尾摘要模板
+    ├── initial-inventory.md          ← 收尾可选：首次记忆盘点（业务导航冷启动）
     ├── migration-v5.md               ← 存量 v4 .memory 升级 v5 账本的蒸馏迁移步骤
     └── design-notes.md               ← 设计依据：codegraph × .memory 分工边界全文（不影响执行，答疑时读）
 ```
@@ -82,6 +83,7 @@ codegraph → 代码结构事实层（机器写、秒级新鲜）：符号位置
 6. **codegraph 与 Node 可用性检测**（仅记录状态 `CODEGRAPH_STATE`，安装动作在产物 5）：`node --version` / `codegraph --version` / 是否存在 `.codegraph/`。判定 `ready` / `cli_only` / `missing` / `no_node`。
 7. **原生个人记忆探测（P4，记入 `NATIVE_MEMORY`）**：`TOOL = claude-code` → `true`（Claude Code 自带个人记忆）；其他宿主 → `false`。决定产物 4 是否创建 `个人偏好.md`、产物 6 宪法选哪个个人偏好条款。
 8. **问用户：单人项目还是团队项目？**（记入 `TEAM_MODE`）单人 → 产物 2 安装时把脚本 `CONFIG.teamMode` 改为 `false`（mark-done 不往入库文件写机读锚点，避免无意义 git diff）；团队 → 保持默认 `true`。
+9. **单人项目追问（记入 `MEMORY_IGNORED`）**：".memory 正文要入库还是整库 gitignore？"默认建议**入库**（换机/重装记忆不丢，且有版本历史）；用户选整库忽略 → 产物 4 的 gitignore 按 `memory-skeleton.md` 的整库忽略分支写。团队项目不问，必须入库。
 
 ## 产物执行流程（按顺序，路径按适配矩阵替换宿主）
 
@@ -104,7 +106,7 @@ codegraph → 代码结构事实层（机器写、秒级新鲜）：符号位置
 
 ### 产物 4：.memory/ 骨架（v5 账本）
 
-读 `references/memory-skeleton.md`，建立六个入库文件：`记忆索引.md`（含查询流水线）、`业务导航.md`、`决策日志.md`、`红线与约定.md`、`跨分支在研功能地图.md`（含机读锚点）、`待确认问题.md`；`NATIVE_MEMORY = false` 时额外创建 gitignored 的 `个人偏好.md`。**不建模块档案目录树**。gitignore 清单见该文件。
+读 `references/memory-skeleton.md`，建立六个入库文件：`记忆索引.md`（含查询流水线）、`业务导航.md`、`决策日志.md`、`红线与约定.md`、`跨分支在研功能地图.md`（含机读锚点）、`待确认问题.md`；`NATIVE_MEMORY = false` 时额外创建 gitignored 的 `个人偏好.md`。**不建模块档案目录树**。gitignore 清单见该文件（`MEMORY_IGNORED = true` 时用整库忽略分支）。
 
 ### 产物 5：codegraph 供给（委托官方安装器）
 
@@ -127,7 +129,7 @@ node <宿主hooks路径>/memory-precheck.mjs --mark-done
 - 不修改业务代码、不修改依赖。
 - 不生成通用架构规则（那是 tvs-inksnow-arch 的职责）。唯一破例：记忆宪法。
 - 不写、不改 codegraph 的指令文件——交给官方安装器。
-- 不直接写记忆内容——只搭骨架，记忆由子 Agent 后续自动维护。
+- 不直接写记忆内容——只搭骨架，记忆由子 Agent 后续自动维护。**唯一例外**：收尾的首次盘点（用户同意后按 `references/initial-inventory.md` 交互式填业务导航初版——"用户怎么叫它"只有用户知道，子 Agent 拿不到）。
 
 ## 存量升级（项目已有 v4 的 .memory 时）
 
@@ -135,4 +137,6 @@ node <宿主hooks路径>/memory-precheck.mjs --mark-done
 
 ## 收尾
 
-按 `references/closing-summary.md` 的模板输出部署摘要（宿主、preset、teamMode、产物清单、codegraph 状态、触发节奏、日常运维命令），然后停止，不进入日常维护态。不输出 diff、不输出 changelog。
+按 `references/closing-summary.md` 的模板输出部署摘要（宿主、preset、teamMode、产物清单、codegraph 状态、触发节奏、日常运维命令）。
+
+摘要之后**问一句："要不要现在做首次记忆盘点？（约 10 分钟，把业务导航填上初版，AI 立刻就能用你的叫法干活）"**——同意则读 `references/initial-inventory.md` 执行；拒绝则告知日后可显式说"做记忆盘点"再来。之后停止，不进入日常维护态。不输出 diff、不输出 changelog。

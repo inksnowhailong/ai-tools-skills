@@ -11,7 +11,7 @@
 - .memory 账本六件：记忆索引（查询流水线）/ 业务导航（术语↔入口）/ 决策日志（append-only）/ 红线与约定 / 跨分支在研功能地图 / 待确认问题
 - 个人偏好层: <Claude Code → 用宿主原生记忆，未建文件 / 其他宿主 → 已建 .memory/个人偏好.md（gitignored）>
 - 记忆宪法（极小常驻规则: 写入边界 + 查询流水线 + 分工路由 + codegraph 自愈 + 个人偏好分流）
-- .memory 正文已入库；.hook-state.json / .codegraph-status.json / 个人偏好.md 被 gitignore
+- <MEMORY_IGNORED=false → .memory 正文已入库；.hook-state.json / .codegraph-status.json / 个人偏好.md 被 gitignore / true → .memory 整库 gitignore（仅存本机，换机/重装前记得手动备份）>
 - codegraph 当前状态: <CODEGRAPH_STATUS>
 
 分工说明（v5：只存不可推导的知识）：
@@ -45,7 +45,7 @@ codegraph 当前状态: <CODEGRAPH_STATUS>
 - 下一次较大代码变更结束时，hook 自动检测并提示（Codex 需显式唤起子 Agent）。
 - 子 Agent 只在出现新决策 / 新红线 / 导航变化时写账本，其余 no-op——记忆只会随"决策次数"增长，不随代码量增长。
 - 建议每月跑一次 --lint-memory，顺便回答输出里的 P1 三问（三问皆否 → 该精简而不是扩充）。
-- .memory 正文已随仓库入库，团队拉取即获得同一份项目记忆。
+- <MEMORY_IGNORED=false → .memory 正文已随仓库入库，团队拉取即获得同一份项目记忆。 / true → .memory 未入库，仅存本机。>
 ```
 
 根据情况追加：
@@ -64,3 +64,5 @@ codegraph 当前状态: <CODEGRAPH_STATUS>
 ```
 
 不要输出代码 diff、不要输出 changelog 风格的"本次修改"——这次部署是一次性安装，不是日常变更。
+
+摘要输出完后，按 SKILL.md 收尾节问首次记忆盘点（流程见 `initial-inventory.md`），用户拒绝则告知日后可显式说"做记忆盘点"。
