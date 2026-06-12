@@ -71,6 +71,26 @@ ARCHITECTURE_PATTERNS:
 - `/^internal\/(domain|usecase|adapter|infrastructure)\//`
 - `/^pkg\/(http|grpc|db)\//`
 
+### preset: rust-fullstack（社区追加：Rust 后端 + frontend-nextjs/ 前端混合仓库）
+
+INCLUDE_PATTERNS:
+- `/^src\//`, `/^migrations\//`, `/^tests\//`
+- `/^Cargo\.(toml|lock)$/`
+- `/^frontend-nextjs\/(app|components|lib|hooks)\//`
+- `/^frontend-nextjs\/package(-lock)?\.json$/`, `/^frontend-nextjs\/pnpm-lock\.yaml$/`, `/^frontend-nextjs\/yarn\.lock$/`
+- `/^frontend-nextjs\/tsconfig.*\.json$/`
+- `/^frontend-nextjs\/(next|tailwind|postcss)\.config\./`, `/^frontend-nextjs\/middleware\./`
+
+CORE_CONFIG_PATTERNS:
+- `/^Cargo\.(toml|lock)$/`, `/^migrations\//`
+- `/^frontend-nextjs\/package(-lock)?\.json$/`, `/^frontend-nextjs\/pnpm-lock\.yaml$/`
+- `/^frontend-nextjs\/tsconfig.*\.json$/`, `/^frontend-nextjs\/next\.config\./`
+
+ARCHITECTURE_PATTERNS:
+- `/^src\/main\.rs$/`, `/^src\/\w*(engine|handlers|migrate|builtins)\w*\.rs$/`
+- `/^migrations\//`
+- `/^frontend-nextjs\/lib\//`, `/^frontend-nextjs\/app\/api\//`
+
 ### 通用 EXCLUDE_PATTERNS（所有 preset 共享）
 
 - `/^\.memory\//`, `/^\.cursor\//`, `/^\.claude\//`, `/^\.codex\//`, `/^\.omc\//`, `/^\.omx\//`, `/^AIConfig\//`
