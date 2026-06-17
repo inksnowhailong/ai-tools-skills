@@ -11,6 +11,7 @@
    - `fast` = `claude-sonnet-4-6`（常规实现）
    - `cheap` = `claude-haiku-4-5-20251001`（只读探索：explore / document-specialist / vision）
    - 角色有显式 `tier` 用它，否则按 `defaultModel` 反推。
+   - ⚠️ **`Agent` 工具的 `model` 参数填短枚举**（`opus`/`sonnet`/`haiku`），不是上面的全 ID：`deep→opus`、`fast→sonnet`、`cheap→haiku`。传全 ID（如 `claude-opus-4-8`）会被拒。
 4. **dev 场景绑项目**：实现类角色服务某项目时，注入项目 `path / 主分支 / 需求`；只读/分析类角色可跨项目共享。
 
 ## 19 角色一览
