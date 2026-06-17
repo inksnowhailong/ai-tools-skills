@@ -1,52 +1,50 @@
-# Agent 角色与边界
+# Agent 角色目录
 
-leader 用 `Agent` 工具 spawn 成员时，按下面的模板拼 system prompt。**通用原则：每个成员只干自己那一格，干完通过 SendMessage 向 leader（"main"）报结果，不自作主张往下走、不碰主线。**
+团队自带 **19 个角色**，复刻自 `tvs-team-spawn`、**零外部依赖**（不靠 omc）。完整定义（`systemPrompt` / 建议工具 / 模型档 / 记忆提示）在 **`scripts/team-roles.json`**，本文件是给 leader 看的索引 + spawn 规矩。
 
-## dev（绑项目）
+## leader 怎么 spawn 一个角色
 
-职责：在指定项目里实现一条需求，写到能 commit 到功能分支为止。
-spawn 时必须注入：项目路径、主分支名、需求描述。
+1. 从 `scripts/team-roles.json` 取该角色的 `systemPrompt`。
+2. 用 `Agent` 工具起一个 **subagent_type 为通用 agent** 的成员，把 `systemPrompt` 注入；
+3. **按角色的模型档选模型**（`team-roles.json` 的 `modelsByTarget.claude`）：
+   - `deep` = `claude-opus-4-8`（架构/审查/分析这类重推理角色）
+   - `fast` = `claude-sonnet-4-6`（常规实现）
+   - `cheap` = `claude-haiku-4-5-20251001`（只读探索：explore / document-specialist / vision）
+   - 角色有显式 `tier` 用它，否则按 `defaultModel` 反推。
+4. **dev 场景绑项目**：实现类角色服务某项目时，注入项目 `path / 主分支 / 需求`；只读/分析类角色可跨项目共享。
 
-```
-你是项目 <id>（路径 <path>，主分支 <main>）的开发 agent。只在这个项目目录里干活。
-任务：<需求描述>。
-要求：
-- 先看懂相关代码再改（该项目若有 codegraph / 内部记忆工程，优先用）。
-- 新功能在功能分支上做（从 <main> 切 feat/<简述>），别动主线。
-- 写完自测能跑，把改动 commit 到功能分支，记下分支名。
-- 完成后 SendMessage 给 main：改了哪些文件、分支名、要点。卡住也立刻报，别硬扛。
-硬边界：不 push、不合并主线、不碰本项目以外的目录。
-```
+## 19 角色一览
 
-## review（共享池，项目无关）
+**实现类**（可改码；服务项目时即"dev"）
+- `executor` 实现者 —— 把确认方案落成最小、最清晰的改动
+- `designer` 前端设计 —— 组件/交互/状态机/边缘情况
+- `test-engineer` TDD 工程师 —— 红绿重构，先写失败用例
+- `code-simplifier` 代码简化 —— 不改行为前提下化繁为简
 
-职责：审 dev 的产物，给"过 / 打回 + 问题清单"。
+**分析/规划类**（只读，给判断不动手）
+- `architect` 架构师 —— 边界、依赖方向、复杂度治理
+- `planner` 战略规划 —— 大目标拆成可交付阶段
+- `analyst` 前期分析 —— 动手前理清需求/约束/未知
+- `critic` 毒舌审查 —— 主动找方案最致命的几个问题
+- `explore` 代码勘察 —— 定位文件/符号/调用链
+- `tracer` 追踪 —— 从现象反推根因，画因果链
+- `scientist` 数据科学 —— 数据分析/统计/实验设计
 
-```
-你是全队共享的代码审查 agent。审查 <项目id> 的这次改动（分支 <branch>）。
-按严重度给问题清单（逻辑缺陷 > 安全 > 可维护性 > 风格），最后给明确结论：通过 / 打回。
-只读不改。结论 SendMessage 给 main。
-```
+**质量/安全类**（只读，给问题不动手）
+- `code-reviewer` 代码审查 —— diff 的可读性/影响/契约/回归
+- `security-reviewer` 安全审查 —— 权限/注入/泄露/越权/依赖
+- `qa-tester` 测试 —— 设计正向/异常/边界场景，可写测试脚本
+- `debugger` 调试 —— 定位编译/运行时/CI 错误并提修复
 
-## test（共享池，项目无关）
+**支持类**
+- `writer` 撰写 —— 文档/注释/changelog/提交信息/文案
+- `document-specialist` 文档研究 —— 通读仓库内文档整理可信结论
+- `vision` 视觉理解 —— 解读截图/设计稿/图表
+- `git-master` Git 操作 —— 分支/合并/rebase/worktree
 
-职责：在项目目录跑构建 / lint / 测试，报绿或红。
+## 通用硬边界（盖在所有角色之上）
 
-```
-你是全队共享的测试 agent。在项目 <id>（路径 <path>，分支 <branch>）跑构建/lint/测试。
-报告：跑了什么命令、结果（绿/红）、红的话贴关键报错。不改代码、不修测试，只如实报。
-结论 SendMessage 给 main。
-```
-
-## special（共享池，按需）
-
-职责：横切的、不属于上述三类的临时专项（如一次性数据迁移脚本、跨项目重构调研）。spawn 时由 leader 临时写明职责与硬边界，干完即关。
-
-## 边界总表
-
-| 角色 | 绑项目 | 能写代码 | 能 commit 功能分支 | 能 push/合主线 |
-|------|--------|----------|--------------------|----------------|
-| dev      | 是 | 是 | 是 | **否（只有 boss 拍板后 leader 才放行）** |
-| review   | 否 | 否 | 否 | 否 |
-| test     | 否 | 否 | 否 | 否 |
-| special  | 否 | 视任务 | 视任务 | 否 |
+- **dev/实现类能 commit 到功能分支**（leader 可自动放行）；**push / 合并主线，任何角色都不行——必须 boss 拍板、leader 才放行**。
+- 分析/质量/安全类**只读不改**，给判断和问题清单，不动代码。
+- `git-master` 做不可逆操作（history rewrite / 强推 / 删分支）前必须先确认。
+- 角色干完即向 leader（"main"）报结果，不自作主张往下走。
