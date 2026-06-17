@@ -65,6 +65,12 @@
 - **leader 绝不对 dormant agent 反复发 shutdown**。看到 `idleReason: "available"` 就认定"已交付、闲置无害"，放着不管。
 - 列表要彻底清干净，只能 `/clear` 或重开会话——团队记忆在 `.tvs-boss/`，重开 `/tvs-boss` 秒恢复，无损失。
 
+**⑧ 在岗名单上报（面板实时用）。** 每次 spawn 或回收角色后，把当前在岗成员覆盖写进 `.tvs-boss/live-agents.json`：
+```json
+{ "updatedAt": "HH:MM", "agents": [ {"name":"crestrail-dev-1","role":"executor","project":"crestrail","state":"warm","since":"HH:MM"} ] }
+```
+这是**运行态 scratchpad、不是记忆**——只反映此刻、被不断覆盖、不进三件套（spawn 列表 git 推不出来，故全队唯独这一项破例落一个临时文件）。面板"团队"tab 读它实时显示在岗。不写也不影响调度，只是面板那栏恒空。
+
 ## 五、被问"现在啥情况"
 
 现场扫：对每个项目 `git -C <path> branch --show-current` / 最近 commit，汇总成人话报给 boss——哪个项目哪条分支在推进、哪个等他拍板。（将来由网页面板替你渲染，当前先口述。）
