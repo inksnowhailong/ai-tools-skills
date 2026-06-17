@@ -49,8 +49,8 @@
 
 **③ 三档回收（按角色性质，回收激进度 = 1 ÷ 冷启动成本 × 复用概率）：**
 - **粘住档（dev/实现类）**：任务完成不立刻关。关的触发只有三个——该项目没在途活了 / 工作集满了被 LRU 挤 / **max-idle 到顶**。
-- **召之即来档（review·security·analyst·architect·planner·qa-tester·debugger·tracer·scientist·writer·git-master 等只读共享）**：用完即关，下次现起（它们几乎无上下文，留着零收益）。
-- **一次性档（explore·document-specialist·vision 等 cheap）**：spawn→干→返回，从不留。
+- **召之即来档（review·security·analyst·architect·planner·qa-tester·debugger·tracer·scientist·writer·git-master 等只读共享）**：派一次性任务、干完它自然完成转 dormant（不主动 keep-alive，下次现起）。
+- **一次性档（explore·document-specialist·vision 等 cheap）**：spawn→干→返回即结束，从不 keep-alive。
 
 **④ max-idle 天花板（粘住档也封顶）。** leader 没有后台计时器，只能**惰性回收**：每次被唤醒（你发消息 / agent 报告）时，扫一遍热 dev，谁"上次活动距今 > max-idle"就当场关。
 - 建议开 `ENABLE_PROMPT_CACHING_1H`，配 **max-idle = 60min**（缓存活 1h，你一小时内回来仍便宜）。
@@ -59,6 +59,11 @@
 **⑤ 循环内不关。** 审→打回→重审这类循环没闭合前，参与该循环的角色不踢（它记着上一轮的问题，关了白丢）。
 
 **⑥ 主会话保护。** 所有角色只向 leader 回**摘要**、不回灌大段输出——防主上下文爆窗，也省额度。
+
+**⑦ 回收的真实边界（实测铁律，别再踩）。** "关掉一个角色"只对**还活着、在处理消息的** agent 有效：发结构化 `shutdown_request`（`SendMessage` 的 `message={"type":"shutdown_request",...}`）→ 它 approve → 终结。**已完成、转入 dormant 的子 agent（心跳 `idleReason: "available"`）杀不动**——它不再读邮箱，shutdown 唤不动它去 approve，反复发只会收到更多 idle 回执（这是空耗轮次的 bug）。但 dormant agent **不耗算力、不烧钱**，只是名字挂在列表里。所以：
+- max-idle / LRU 的"关"只对**被 keep-alive 的常驻角色**生效；对干完即 dormant 的角色，既无强杀手段、也无需强杀（它已不占资源）。
+- **leader 绝不对 dormant agent 反复发 shutdown**。看到 `idleReason: "available"` 就认定"已交付、闲置无害"，放着不管。
+- 列表要彻底清干净，只能 `/clear` 或重开会话——团队记忆在 `.tvs-boss/`，重开 `/tvs-boss` 秒恢复，无损失。
 
 ## 五、被问"现在啥情况"
 
