@@ -403,10 +403,20 @@ function doctor(args) {
 
 function parseArgs(argv) {
     const args = { _: [] }
-    for (const a of argv) {
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]
         if (a.startsWith('--')) {
             const [k, v] = a.slice(2).split('=')
-            args[k] = v ?? true
+            if (v !== undefined) {
+                // 等号式：--key=value
+                args[k] = v
+            } else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+                // 空格式：--key value（下一个 token 非 flag 时作为值消费）
+                args[k] = argv[++i]
+            } else {
+                // 纯布尔 flag：--fix / --pull / --force / --prune
+                args[k] = true
+            }
         } else args._.push(a)
     }
     return args
