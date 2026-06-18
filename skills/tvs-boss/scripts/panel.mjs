@@ -3,17 +3,21 @@
  * tvs-boss 团队面板 —— 零依赖终端 ANSI 字符画 TUI（v4：原地重绘 + 键控切屏）。
  *
  * 只用 node 内置（fs / child_process / readline / process.stdout + ANSI 转义），不引任何三方库。
- * 形态从 v3 的「本地网页 + SSE」改成「终端里跑的 TUI」：
- *   - 进备用屏（alt-screen），原地清屏重画当前屏，退出时原样还原终端，不留滚动残影。
- *   - 键盘 1~5 切屏（第 6 屏「任务」按数据有无自动出现），q / Ctrl+C 退出。
- *   - 实时两路（沿用 v3 思路）：fs.watch(.tvs-boss) 文件变即时重扫（150ms 抖动合并）+ 每 2s 兜底重扫 git。
  *
- * 数据引擎（findTeamRoot / readMem / readLiveAgents / parseProjects / git / gitSnapshot / buildState）
- *   逻辑与 v3 完全一致，只换渲染层和交互层。
+ * 【展示原则】panel 只呈现「git 派生 + 真实文件原文」这类即时读就准的数据，
+ *   不呈现需 leader 人工同步才正确的运行态（如曾经的 live-agents.json）——会过期、不可信。
+ *   所以屏只剩：总览/项目（git 现推）+ 守则/契约/任务（直接读真实文件）。
+ *
+ * 形态「终端里跑的 TUI」：
+ *   - 进备用屏（alt-screen），原地清屏重画当前屏，退出时原样还原终端，不留滚动残影。
+ *   - 键盘 1~5 切屏（第 5 屏「任务」按数据有无自动出现）；↑↓/jk 滚动；q / Ctrl+C 退出。
+ *   - 实时两路：fs.watch(.tvs-boss) 文件变即时重扫（150ms 抖动合并）+ 每 2s 兜底重扫 git。
+ *
+ * 数据引擎（findTeamRoot / readMem / readTasks / parseProjects / git / gitSnapshot / buildState）。
  *
  * 用法：node panel.mjs [--root <团队根路径>]
  *   --root 显式指定团队根（含 .tvs-boss/），不依赖启动时 cwd —— 启动器/双击场景用它最稳。
- *   不传则从当前目录向上自动探测。配套一键启动器见同级目录 panel.cmd（双击即开）。
+ *   不传则从当前目录向上自动探测。一键开窗见 open-panel.mjs / 团队根下生成的 panel.cmd。
  */
 import { readFileSync, existsSync, watch } from 'node:fs';
 import { join, parse as parsePath, resolve } from 'node:path';
@@ -37,14 +41,6 @@ function readMem(root, name) {
     const p = join(root, '.tvs-boss', name);
     if (!existsSync(p)) return `（${name} 还没建）`;
     return readFileSync(p, 'utf8');
-}
-
-/** 读在岗名单（运行态文件，可能不存在） */
-function readLiveAgents(root) {
-    const p = join(root, '.tvs-boss', 'live-agents.json');
-    if (!existsSync(p)) return { updatedAt: '', agents: [] };
-    try { const j = JSON.parse(readFileSync(p, 'utf8')); return { updatedAt: j.updatedAt || '', agents: j.agents || [] }; }
-    catch { return { updatedAt: '', agents: [] }; }
 }
 
 function parseProjects(md) {
@@ -82,7 +78,7 @@ function gitSnapshot(p) {
     return { ...p, branch, dirty, ahead, behind, branches, last: { msg, when, who } };
 }
 
-/** 读 tvs-task 的任务表（~/.tasklog/active.md），第 6 屏用。无文件则返回 null（屏不出现）。 */
+/** 读 tvs-task 的任务表（~/.tasklog/active.md），任务屏用。无文件则返回 null（屏不出现）。 */
 function readTasks() {
     const p = join(homedir(), '.tasklog', 'active.md');
     if (!existsSync(p)) return null;
@@ -91,13 +87,10 @@ function readTasks() {
 
 function buildState(root) {
     const projectsMd = readMem(root, 'projects.md');
-    const live = readLiveAgents(root);
     return {
         root,
         now: new Date().toLocaleTimeString('zh-CN'),
         projects: parseProjects(projectsMd).map(gitSnapshot),
-        agents: live.agents,
-        agentsUpdatedAt: live.updatedAt,
         rulesMd: readMem(root, 'rules.md'),
         contractsMd: readMem(root, 'contracts.md'),
         tasksMd: readTasks(),
@@ -182,8 +175,8 @@ function padTo(str, width) {
 
 /* ────────────────────────── 屏定义 + 帧组装 ────────────────────────── */
 
-// 第 6 屏「任务」仅在有 ~/.tasklog/active.md 时出现
-const BASE_TABS = [['总览', 'overview'], ['项目', 'projects'], ['团队', 'team'], ['守则', 'rules'], ['契约', 'contracts']];
+// 「任务」屏（末屏）仅在有 ~/.tasklog/active.md 时出现
+const BASE_TABS = [['总览', 'overview'], ['项目', 'projects'], ['守则', 'rules'], ['契约', 'contracts']];
 function tabsFor(state) {
     return state?.tasksMd != null ? [...BASE_TABS, ['任务', 'tasks']] : BASE_TABS;
 }
@@ -231,8 +224,8 @@ function viewOverview(innerW) {
     const dirty = ps.filter((p) => p.dirty > 0).length;
     const feat = ps.reduce((n, p) => n + ((p.branches || []).length), 0);
     const lines = [];
-    // 四个数：项目 / 在岗 / 在途分支 / 未提交
-    const stat = `${c.bold('项目' + ps.length)}    ${c.bold('在岗' + (state.agents || []).length)}    ${c.bold('在途分支' + feat)}    ${c.bold('未提交' + dirty)}`;
+    // 三个数（都是 git 能算准的）：项目 / 在途分支 / 未提交
+    const stat = `${c.bold('项目' + ps.length)}    ${c.bold('在途分支' + feat)}    ${c.bold('未提交' + dirty)}`;
     lines.push(' ' + stat);
     lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
     if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
@@ -280,31 +273,10 @@ function viewProjects(innerW) {
     return lines;
 }
 
-/** 团队屏：在岗名单 name/role/project/state/since */
-function viewTeam(innerW) {
-    const ag = state.agents || [];
-    if (!ag.length) {
-        return [
-            c.dim(' 当前无在岗成员（懒启动：来活才 spawn）'),
-            c.dim(' leader 没在写 live-agents.json 时这里恒空'),
-        ];
-    }
-    const lines = [];
-    if (state.agentsUpdatedAt) lines.push(c.dim(' 名单更新于 ' + state.agentsUpdatedAt));
-    for (const a of ag) {
-        const role = c.mag(a.role || '?');
-        const proj = a.project ? c.cyan(a.project) : c.dim('—');
-        const st = c.green(a.state || '在岗');
-        lines.push(` ${c.bold(padTo(a.name || '?', 14))} ${padTo(role, 18)} ${padTo(proj, 16)} ${st}`);
-        if (a.since) lines.push(c.dim('   起于 ' + a.since));
-    }
-    return lines;
-}
-
 /**
  * 行内 markdown 标记 → ANSI：双星/双下划线粗体 → 去标记并加 ANSI 粗体；
  * 单下划线/单星斜体 → 去标记；反引号 code → 去反引号。emoji 原样保留。
- * 仅第 6 屏「任务」用（rich=true），守则/契约保持纯轻量不动。
+ * 仅「任务」屏用（rich=true），守则/契约保持纯轻量不动。
  */
 function mdInline(s) {
     return s
@@ -344,7 +316,6 @@ function frame() {
     const key = tabs[cur][1];
     if (key === 'overview') body = viewOverview(innerW);
     else if (key === 'projects') body = viewProjects(innerW);
-    else if (key === 'team') body = viewTeam(innerW);
     else if (key === 'rules') body = viewMarkdown(state.rulesMd, innerW);
     else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
     else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
