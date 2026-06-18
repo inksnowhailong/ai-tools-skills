@@ -94,15 +94,44 @@ function readTasks() {
     try { return readFileSync(p, 'utf8'); } catch { return null; }
 }
 
+/**
+ * 解析 active.md 里的"进行中"任务（雷达停滞行 + 后续任务×git 屏共用此解析器）。
+ * 锚点：`## T-xxx · 标题` 起一条；段内 `- **状态**：…进行中` 视为进行中；`- **更新**：YYYY-MM-DD` 取更新日。
+ * 返回 [{ id, title, updatedDays }]，updatedDays = 距今天数（无更新日则 null）。
+ * @param {string|null} md active.md 原文
+ */
+function parseActiveTasks(md) {
+    if (!md) return [];
+    const out = [];
+    let cur = null;
+    const flush = () => { if (cur && cur.inProgress) out.push({ id: cur.id, title: cur.title, updatedDays: cur.updatedDays }); };
+    for (const raw of md.split('\n')) {
+        const line = raw.trim();
+        const h = line.match(/^##\s+(T-\d+)\s*·\s*(.+?)\s*$/);
+        if (h) { flush(); cur = { id: h[1], title: h[2], inProgress: false, updatedDays: null }; continue; }
+        if (!cur) continue;
+        if (/^-\s*\*\*状态\*\*[：:]/.test(line) && /进行中/.test(line)) cur.inProgress = true;
+        const u = line.match(/^-\s*\*\*更新\*\*[：:]\s*(\d{4})-(\d{2})-(\d{2})/);
+        if (u) {
+            const t = new Date(Number(u[1]), Number(u[2]) - 1, Number(u[3])).getTime();
+            cur.updatedDays = Math.floor((Date.now() - t) / 86400000);
+        }
+    }
+    flush();
+    return out;
+}
+
 function buildState(root) {
     const projectsMd = readMem(root, 'projects.md');
+    const tasksMd = readTasks();
     return {
         root,
         now: new Date().toLocaleTimeString('zh-CN'),
         projects: parseProjects(projectsMd).map(gitSnapshot),
         rulesMd: readMem(root, 'rules.md'),
         contractsMd: readMem(root, 'contracts.md'),
-        tasksMd: readTasks(),
+        tasksMd,
+        tasks: parseActiveTasks(tasksMd), // 解析出的进行中任务（雷达停滞行用；后续任务×git 屏也用）
     };
 }
 
@@ -200,12 +229,13 @@ function padTo(str, width) {
 /* ────────────────────────── 行动雷达阈值（一处可调，boss 按需改）────────────────────────── */
 // 这些是"需关注"的触发线；都是 git 派生量，改一个常量即调灵敏度。
 const RADAR = {
-    STALE_DAYS: 2,   // 有未提交改动 且 距上次提交 ≥ 这么多天 → 提醒"别丢了"
-    AHEAD_PR: 1,     // 分支领先主线 ≥ 这么多提交没合 → 提醒"该开 PR"
-    BEHIND_REBASE: 1,// 落后主线 ≥ 这么多 → 提醒"该 rebase"
+    STALE_DAYS: 2,    // 有未提交改动 且 距上次提交 ≥ 这么多天 → 提醒"别丢了"
+    AHEAD_PR: 1,      // 分支领先主线 ≥ 这么多提交没合 → 提醒"该开 PR"
+    BEHIND_REBASE: 1, // 落后主线 ≥ 这么多 → 提醒"该 rebase"
+    TASK_STALE_DAYS: 5,// tvs-task 进行中任务 距更新 ≥ 这么多天 → 提醒"推进?"
 };
 // 各类目严重度（数值越大越靠前）；排序与配色都用它，调顺序改这里即可。
-const SEV = { behind: 40, ahead: 30, dirtyStale: 50, error: 60 };
+const SEV = { behind: 40, ahead: 30, dirtyStale: 50, error: 60, taskStale: 35 };
 
 /* ────────────────────────── 屏定义 + 帧组装 ────────────────────────── */
 
@@ -294,6 +324,13 @@ function viewRadar(innerW) {
         }
         if (p.ahead >= RADAR.AHEAD_PR) items.push({ sev: SEV.ahead, icon: '↑', iconColor: c.ahead, proj: p.id, desc: `领先主线${p.ahead}没合`, action: '该开 PR' });
         if (p.behind >= RADAR.BEHIND_REBASE) items.push({ sev: SEV.behind, icon: '↓', iconColor: c.red, proj: p.id, desc: `落后主线${p.behind}`, action: '该 rebase' });
+    }
+    // tvs-task 停滞任务（进行中 且 距更新 ≥ TASK_STALE_DAYS）。
+    // 图标用宽度 1 的 ◔（替 🕐 emoji——emoji 多为宽 2 且不在 isWide 范围，会破坏 [80] 对齐）。
+    for (const t of (state.tasks || [])) {
+        if (t.updatedDays != null && t.updatedDays >= RADAR.TASK_STALE_DAYS) {
+            items.push({ sev: SEV.taskStale, icon: '◔', iconColor: c.mag, proj: t.id, desc: `${clip(t.title, 18)} 停滞${t.updatedDays}天`, action: '推进?' });
+        }
     }
     items.sort((a, b) => b.sev - a.sev);
 
