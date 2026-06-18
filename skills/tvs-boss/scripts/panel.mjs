@@ -21,9 +21,12 @@
  */
 import { readFileSync, existsSync, watch } from 'node:fs';
 import { join, parse as parsePath, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { homedir } from 'node:os';
 import readline from 'node:readline';
+
+const execAsync = promisify(exec);
 
 /* ────────────────────────── 数据引擎（照搬 v3，逻辑不变） ────────────────────────── */
 
@@ -58,31 +61,33 @@ function parseProjects(md) {
     return out;
 }
 
-function git(path, args) {
-    try { return execSync(`git -C "${path}" ${args}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim(); }
+// 异步跑 git（promisify(exec) 走 shell，保留 --format="…" 的引号语义，与原同步版行为一致；
+// 关键：异步=不阻塞事件循环，2s 重扫期间按键/滚动照样跟手）。出错返回 null，契约同原版。
+async function git(path, args) {
+    try { const { stdout } = await execAsync(`git -C "${path}" ${args}`, { encoding: 'utf8' }); return stdout.trim(); }
     catch { return null; }
 }
 
-function gitSnapshot(p) {
-    const branch = git(p.path, 'rev-parse --abbrev-ref HEAD');
+async function gitSnapshot(p) {
+    const branch = await git(p.path, 'rev-parse --abbrev-ref HEAD');
     if (branch === null) return { ...p, error: '读不到 git（路径不存在或非仓库）' };
-    const porcelain = git(p.path, 'status --porcelain') || '';
+    // branch 判过非空后，其余调用彼此独立 → 并发拿，省一仓库内的串行等待
+    const [porcelain0, lr, refOut, stashOut0, last0] = await Promise.all([
+        git(p.path, 'status --porcelain'),
+        git(p.path, `rev-list --left-right --count ${p.main}...HEAD`),
+        git(p.path, 'for-each-ref --sort=-committerdate refs/heads/ --format="%(refname:short)|%(committerdate:relative)"'),
+        git(p.path, 'stash list'),
+        git(p.path, 'log -1 --format="%s%x1f%cr%x1f%an%x1f%ct"'),
+    ]);
+    const porcelain = porcelain0 || '';
     const dirty = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
     let ahead = 0, behind = 0;
-    const lr = git(p.path, `rev-list --left-right --count ${p.main}...HEAD`);
     if (lr) { const [b, a] = lr.split(/\s+/).map(Number); behind = b || 0; ahead = a || 0; }
-    // 一次 for-each-ref 同时拿到 在途分支 + 各自最近活跃时间（按时间倒序），避免每分支再 git log（省 N 次 execSync）
-    const refLines = (git(p.path, 'for-each-ref --sort=-committerdate refs/heads/ --format="%(refname:short)|%(committerdate:relative)"') || '')
-        .split('\n').map((s) => s.trim()).filter(Boolean);
-    const branches = refLines
+    const branches = (refOut || '').split('\n').map((s) => s.trim()).filter(Boolean)
         .map((l) => { const [name, age] = l.split('|'); return { name, age }; })
         .filter((b) => b.name && b.name !== p.main);
-    // stash 数：一次 stash list 计数
-    const stashOut = git(p.path, 'stash list') || '';
-    const stash = stashOut ? stashOut.split('\n').filter(Boolean).length : 0;
-    // 用 \x1f(单元分隔符)分隔，避免提交标题里的 | 把字段串位；%ct 给机器可读时间（雷达算"几天没动"）
-    const last = git(p.path, 'log -1 --format="%s%x1f%cr%x1f%an%x1f%ct"') || '';
-    const [msg, when, who, ct] = last.split('\x1f');
+    const stash = stashOut0 ? stashOut0.split('\n').filter(Boolean).length : 0;
+    const [msg, when, who, ct] = (last0 || '').split('\x1f');
     const ageDays = ct ? Math.floor((Date.now() / 1000 - Number(ct)) / 86400) : null;
     return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who, ageDays } };
 }
@@ -121,13 +126,15 @@ function parseActiveTasks(md) {
     return out;
 }
 
-function buildState(root) {
+async function buildState(root) {
     const projectsMd = readMem(root, 'projects.md');
     const tasksMd = readTasks();
+    // 各项目并发扫（彼此独立目录，安全）——Windows 上 git 启动开销大，并发把整轮墙钟砍到 ~1/N
+    const projects = await Promise.all(parseProjects(projectsMd).map(gitSnapshot));
     return {
         root,
         now: new Date().toLocaleTimeString('zh-CN'),
-        projects: parseProjects(projectsMd).map(gitSnapshot),
+        projects,
         rulesMd: readMem(root, 'rules.md'),
         contractsMd: readMem(root, 'contracts.md'),
         tasksMd,
@@ -334,6 +341,8 @@ function viewRadar(innerW) {
     }
     items.sort((a, b) => b.sev - a.sev);
 
+    // 首帧空壳（git 还没扫完）：显示"扫描中…"而非"还没建团"，避免 boss 误以为团队没了
+    if (state.loading) { lines.push(''); lines.push('  ' + c.dim('扫描中…（首次拉取各项目 git 状态）')); return lines; }
     if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
     if (!items.length) { lines.push(''); lines.push('  ' + c.green('✓ 一切安好') + c.dim(' —— 没有需要你动手的事')); return lines; }
 
@@ -501,22 +510,55 @@ function frame() {
 /* ────────────────────────── 重绘 / 重扫 ────────────────────────── */
 
 let drawScheduled = false;
-/** 原地重绘：清屏 + 回到左上 + 写整帧。用微合并避免一拍多画。 */
+let lastRowCount = 0; // 上一帧实际行数（用于新帧更短时擦掉多余尾行）
+/**
+ * 无闪原地重绘：不再整屏 2J（那会先黑屏再画、滚动时一闪一闪）。
+ * 改为逐行「光标定位 \x1b[r;1H + 写该行 + \x1b[K 清到行尾」，最后 \x1b[J 擦掉旧帧多出来的尾行。
+ * raw 模式下不靠 \n（可能只下移不回车），用显式行号定位最稳。render/onKey 全同步、只读缓存 state。
+ */
 function render() {
     if (drawScheduled) return;
     drawScheduled = true;
     setImmediate(() => {
         drawScheduled = false;
         if (!state) return;
-        // \x1b[H 回原点；\x1b[J 清到屏尾（配合 alt-screen，不滚动、无残影）
-        out.write('\x1b[H\x1b[J' + frame());
+        const rows = frame().split('\n');
+        let buf = '';
+        for (let i = 0; i < rows.length; i++) buf += `\x1b[${i + 1};1H` + rows[i] + '\x1b[K';
+        if (rows.length < lastRowCount) buf += `\x1b[${rows.length + 1};1H\x1b[J`; // 新帧更短 → 清掉残留尾行
+        lastRowCount = rows.length;
+        out.write(buf);
     });
 }
 
-/** 重扫数据（跑 git，可能阻塞）→ 刷新缓存 → 重绘。只有定时器/文件监听调它。 */
-function rebuild() {
-    try { state = buildState(teamRoot); } catch { /* 单次重扫失败忽略，留旧帧 */ }
-    render();
+// 数据变更签名：只看 git/文件派生量，【刻意排除 now 时钟】——否则每秒都"变"、永远跳不过重绘。
+function dataSig(s) {
+    if (!s) return '';
+    const proj = (s.projects || []).map((p) => p.error
+        ? `${p.id}!err`
+        : `${p.id}|${p.branch}|${p.dirty}|${p.ahead}|${p.behind}|${p.stash}|${(p.branches || []).map((b) => b.name + b.age).join(',')}|${p.last && p.last.msg}|${p.last && p.last.when}`
+    ).join('；');
+    const tasks = (s.tasks || []).map((t) => `${t.id}:${t.updatedDays}`).join(',');
+    return proj + '∥' + tasks + '∥' + (s.rulesMd || '').length + '∥' + (s.contractsMd || '').length + '∥' + (s.tasksMd || '').length;
+}
+
+let scanning = false;      // 重扫互斥：异步扫 >2s 时定时器再来不叠加
+let lastSig = null;        // 上次数据签名；没变就不重绘（空闲零写、零闪）
+/**
+ * 异步重扫（不阻塞事件循环 → 扫描期间按键/滚动照样跟手）。
+ * 拿到新数据比对签名：变了才刷缓存+重绘，没变直接丢弃（除非首帧/强制）。
+ * @param {boolean} force 强制重绘（首帧、手动 r）：即便签名没变也画一帧
+ */
+async function rebuild(force = false) {
+    if (scanning) return;
+    scanning = true;
+    try {
+        const next = await buildState(teamRoot);
+        const sig = dataSig(next);
+        if (force || sig !== lastSig) { state = next; lastSig = sig; render(); }
+        else { state = next; } // 数据没变，仅静默更新缓存（含新 now），不重绘
+    } catch { /* 单次重扫失败忽略，留旧帧 */ }
+    finally { scanning = false; }
 }
 
 /* ────────────────────────── 终端进入 / 退出 ────────────────────────── */
@@ -584,7 +626,7 @@ function onKey(str, key) {
     else if (key.name === 'pagedown') { scroll += page; render(); }
     else if (key.name === 'home' || str === 'g') { scroll = 0; render(); }
     else if (key.name === 'end' || str === 'G') { scroll = Number.MAX_SAFE_INTEGER; render(); }
-    else if (str === 'r') { rebuild(); } // r 手动刷新
+    else if (str === 'r') { rebuild(true); } // r 手动强制刷新
 }
 
 /* ────────────────────────── 主流程 ────────────────────────── */
@@ -609,21 +651,24 @@ function main() {
     }
 
     enterTui();
-    rebuild(); // 首帧
+    // 首帧：先用空壳 state 立刻画一帧（git 异步扫 ~1s，避免启动黑屏），再触发首次强制重扫
+    state = { root: teamRoot, now: new Date().toLocaleTimeString('zh-CN'), projects: [], rulesMd: '', contractsMd: '', tasksMd: null, tasks: [], loading: true };
+    render();
+    rebuild(true); // 首次强扫（async，不阻塞）
 
     // 实时一：fs.watch 文件变即时重扫（150ms 抖动合并）
     try {
         watcher = watch(join(teamRoot, '.tvs-boss'), () => {
             clearTimeout(fsTimer);
-            fsTimer = setTimeout(rebuild, 150);
+            fsTimer = setTimeout(() => rebuild(), 150);
         });
     } catch { /* 平台不支持 watch 时降级，靠下面的定时重扫 */ }
 
-    // 实时二：每 2s 兜底重扫 git
-    gitTimer = setInterval(rebuild, 2000);
+    // 实时二：每 2s 兜底重扫 git（异步，不阻塞输入；scanning 互斥防叠加；数据没变不重绘）
+    gitTimer = setInterval(() => rebuild(), 2000);
 
-    // 窗口尺寸变化 → 仅重绘（不必重扫数据）
-    out.on('resize', render);
+    // 窗口尺寸变化 → 先整屏清一次（变窄时旧宽行会留残），再重绘
+    out.on('resize', () => { out.write('\x1b[2J'); lastRowCount = 0; render(); });
 }
 
 if (process.argv[1]?.endsWith('panel.mjs')) main();
