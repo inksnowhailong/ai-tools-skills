@@ -41,6 +41,8 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 ### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
+> **boss 说"看面板 / 打开面板 / 开看板"时**：leader 直接跑 `node "$SKILL/scripts/open-panel.mjs" --root "<团队根>"` 替 boss 把面板弹出来（跨平台自动开窗：Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app；linux 用 $TERMINAL 兜底）。**不要让 boss 自己敲命令**——leader 知道 `$SKILL` 和团队根，全自定位。
+
 ## 核心铁律（已焊死）
 - **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离；worktree 仅"单项目内多角色改同 repo"时才用。
 - **dev 绑项目**；review/test 等是全队共享角色。
@@ -57,5 +59,6 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - `references/architecture.md` —— 整体形状 + 决策。
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），leader spawn 时读它取 systemPrompt + 模型档。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，终端里看 总览/项目/团队/守则/契约（键盘 1~5 切屏，←→ 也切，q/Ctrl+C 退出；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」，富 markdown 渲染干净）。`--root` 接 团队根 / `.tvs-boss` 目录 / 其下子目录 都能正确解析，不依赖 cwd。
-- `scripts/make-launcher.mjs` —— **启动器生成器**：`node scripts/make-launcher.mjs --root <团队根>`，往 `<团队根>/.tvs-boss/` 生成双击即用的一键启动器（Windows `panel.cmd` + mac `panel.command`）。启动器弹一个正经终端窗口（Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app）跑 TUI，ANSI 正常、可键盘交互；团队根靠启动器自定位、panel.mjs 路径生成时填入，零硬编码。**启动器是按团队生成的运行态产物，落在团队根、不进 skill 源码**（见启动协议第 5 步）。
+- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，终端里看 总览/项目/团队/守则/契约（**键盘 1~6 切屏；↑↓ 或 j/k 在当前屏滚动一行，PgUp/PgDn 翻页，g/G 跳首尾；q/Ctrl+C 退出**）。内容超出终端高度可纵向滚动、不截断，边线显示滚动指示；柔和 256-color 配色护眼，无色终端降级；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」，富 markdown 渲染干净。`--root` 接 团队根 / `.tvs-boss` 目录 / 其下子目录 都能正确解析，不依赖 cwd。
+- `scripts/open-panel.mjs` —— **跨平台开窗器**：`node scripts/open-panel.mjs [--root <团队根>] [--print]`，检测平台弹一个新终端窗口跑面板（Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app；linux 用 $TERMINAL 兜底；都没有就当前终端直跑）。窗口/spawn 逻辑的**单一真源**——leader 的「看面板」和生成的启动器都走它。panel.mjs 路径由自身位置推出、团队根 --root/探测，零硬编码；`--print` 只打印将执行命令（dry-run）。
+- `scripts/make-launcher.mjs` —— **启动器生成器**：`node scripts/make-launcher.mjs --root <团队根>`，往 `<团队根>/.tvs-boss/` 生成双击即用的启动器（Windows `panel.cmd` + mac `panel.command`）。生成的是**薄壳**：只自定位团队根 + 调 `open-panel.mjs`（开窗逻辑不在启动器里）。**启动器是按团队生成的运行态产物，落在团队根、不进 skill 源码**（见启动协议第 4 步）。

@@ -110,19 +110,21 @@ const out = process.stdout;
 const COLOR = out.isTTY && !process.env.NO_COLOR; // 不支持色彩或显式关色时降级为无色
 const COLS = () => out.columns || 80;             // 终端列数，随窗口变
 
-// ANSI 颜色：关色时全部返回原文，保证无色终端可读
+// ANSI 颜色：用 256-color 低饱和柔和色号，护眼不刺眼；关色时全部返回原文，保证无色终端可读。
+// 取舍：避开纯绿(2)/纯红(1)/纯青(6) 这类高亮原色，改用灰调中间色——状态仍可区分，长时间看不累。
+const fg = (n) => (s) => (COLOR ? `\x1b[38;5;${n}m${s}\x1b[0m` : s);
 const c = {
     reset: COLOR ? '\x1b[0m' : '',
     dim: (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s),
     bold: (s) => (COLOR ? `\x1b[1m${s}\x1b[0m` : s),
-    cyan: (s) => (COLOR ? `\x1b[36m${s}\x1b[0m` : s),
-    green: (s) => (COLOR ? `\x1b[32m${s}\x1b[0m` : s),
-    yellow: (s) => (COLOR ? `\x1b[33m${s}\x1b[0m` : s),
-    red: (s) => (COLOR ? `\x1b[31m${s}\x1b[0m` : s),
-    blue: (s) => (COLOR ? `\x1b[34m${s}\x1b[0m` : s),
-    mag: (s) => (COLOR ? `\x1b[35m${s}\x1b[0m` : s),
-    gray: (s) => (COLOR ? `\x1b[90m${s}\x1b[0m` : s),
-    invCyan: (s) => (COLOR ? `\x1b[46m\x1b[30m${s}\x1b[0m` : `[${s}]`), // 选中 tab 反白
+    cyan: fg(109),    // 柔和青（分支/强调）
+    green: fg(108),   // 柔和绿（干净/ahead）
+    yellow: fg(179),  // 柔和琥珀（有改动）
+    red: fg(167),     // 柔和砖红（behind/错误）
+    blue: fg(110),    // 柔和蓝（在途分支）
+    mag: fg(139),     // 柔和紫（角色）
+    gray: fg(245),    // 中性灰（框线/次要）
+    invCyan: (s) => (COLOR ? `\x1b[48;5;109m\x1b[38;5;235m${s}\x1b[0m` : `[${s}]`), // 选中 tab：柔和青底+深字
 };
 
 /**
@@ -188,6 +190,7 @@ function tabsFor(state) {
 
 let state = null;  // 唯一缓存态；只有 rebuild() 写它，render() 只读它（切屏不碰 git）
 let cur = 0;       // 当前屏索引
+let scroll = 0;    // 当前屏纵向滚动偏移（行）。key 里乐观增减，统一在 frame() 里夹紧——见下
 let teamRoot = null;
 
 /** 顶部状态栏 + tab 行（tab 行嵌进上框边） */
@@ -211,8 +214,15 @@ function header(tabs, innerW) {
 function boxLine(content, innerW) {
     return '│' + padTo(content, innerW) + '│';
 }
-function sepLine(innerW) { return '├' + c.gray('─'.repeat(innerW)) + '┤'; }
-function botLine(innerW) { return '└' + c.gray('─'.repeat(innerW)) + '┘'; }
+/** 边线嵌一个右对齐小标签（滚动指示用）：├──────↑3 行──┤。label 为空则纯线。 */
+function edgeLine(left, right, innerW, label) {
+    if (!label) return left + c.gray('─'.repeat(innerW)) + right;
+    const lw = dispWidth(label);
+    const fill = Math.max(0, innerW - lw - 2);
+    return left + c.gray('─'.repeat(fill)) + ' ' + c.dim(label) + ' ' + right;
+}
+function sepLine(innerW, label) { return edgeLine('├', '┤', innerW, label); }
+function botLine(innerW, label) { return edgeLine('└', '┘', innerW, label); }
 
 /* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
 
@@ -340,19 +350,28 @@ function frame() {
     else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
 
     const head = header(tabs, innerW);
-    const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · q退出 · 每2s现场git推 · fs变即时刷');
+    const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · ↑↓/jk滚动 · PgUp/PgDn翻页 · g/G首尾 · q退出');
 
     // 高度预算：终端行数 - 顶栏(1) - 上框(1) - 分隔(1) - 下框(1) - 底提示(1) - 安全(1)
     const rows = out.rows || 24;
     const maxBody = Math.max(3, rows - 6);
-    let shown = body;
-    if (body.length > maxBody) { shown = body.slice(0, maxBody - 1); shown.push(c.dim(' …（终端太矮，省略 ' + (body.length - maxBody + 1) + ' 行）')); }
+
+    // —— 滚动夹紧只此一处 —— body.length 只有这里才知道（依赖数据/换行/终端宽）。
+    // key 里乐观增减 scroll，到这里统一夹到 [0, maxScroll]，一处兜住：按键过冲 / resize 变矮 / 数据缩短。
+    const maxScroll = Math.max(0, body.length - maxBody);
+    if (scroll > maxScroll) scroll = maxScroll;
+    if (scroll < 0) scroll = 0;
+    const shown = body.slice(scroll, scroll + maxBody);
+
+    // 滚动指示放进边线（不占正文行，避免滚动时底框跳动）
+    const above = scroll > 0 ? `↑${scroll} 行` : '';
+    const below = scroll < maxScroll ? `↓${maxScroll - scroll} 行` : '';
 
     const lines = [
         ...head,
-        sepLine(innerW),
+        sepLine(innerW, above),
         ...shown.map((ln) => boxLine(ln, innerW)),
-        botLine(innerW),
+        botLine(innerW, below),
         foot,
     ];
     return lines.join('\n');
@@ -424,18 +443,24 @@ function onKey(str, key) {
         process.exit(0);
         return;
     }
-    // 数字切屏（仅在范围内）
+    // 数字切屏（仅在范围内）：切屏归零滚动
     const tabs = tabsFor(state);
     const n = parseInt(str, 10);
     if (n >= 1 && n <= tabs.length) {
-        cur = n - 1;
+        cur = n - 1; scroll = 0;
         render(); // 纯缓存重绘，不碰 git → 切屏零延迟
         return;
     }
-    // ← / → 也支持切屏
-    if (key.name === 'left') { cur = (cur - 1 + tabs.length) % tabs.length; render(); }
-    else if (key.name === 'right') { cur = (cur + 1) % tabs.length; render(); }
-    else if (key.name === 'r') { rebuild(); } // r 手动刷新
+    // 纵向滚动：↑/k 上一行、↓/j 下一行、PgUp/PgDn 翻页、g/Home 顶、G/End 底。
+    // 全部乐观增减，越界由 frame() 夹紧（END 用大数顶到底，clamp 会收）。
+    const page = Math.max(1, (out.rows || 24) - 7);
+    if (key.name === 'up' || str === 'k') { scroll -= 1; render(); }
+    else if (key.name === 'down' || str === 'j') { scroll += 1; render(); }
+    else if (key.name === 'pageup') { scroll -= page; render(); }
+    else if (key.name === 'pagedown') { scroll += page; render(); }
+    else if (key.name === 'home' || str === 'g') { scroll = 0; render(); }
+    else if (key.name === 'end' || str === 'G') { scroll = Number.MAX_SAFE_INTEGER; render(); }
+    else if (str === 'r') { rebuild(); } // r 手动刷新
 }
 
 /* ────────────────────────── 主流程 ────────────────────────── */
