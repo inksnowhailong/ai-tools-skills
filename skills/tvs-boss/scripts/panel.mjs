@@ -99,27 +99,55 @@ function readTasks() {
     try { return readFileSync(p, 'utf8'); } catch { return null; }
 }
 
+/** 路径归一（Windows 大小写不敏感、分隔符统一、去尾斜杠）——任务↔分支按 (仓库,分支) join 的关键，不归一会 0 命中 */
+function normPath(p) {
+    return String(p || '').trim().replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
 /**
- * 解析 active.md 里的"进行中"任务（雷达停滞行 + 后续任务×git 屏共用此解析器）。
- * 锚点：`## T-xxx · 标题` 起一条；段内 `- **状态**：…进行中` 视为进行中；`- **更新**：YYYY-MM-DD` 取更新日。
- * 返回 [{ id, title, updatedDays }]，updatedDays = 距今天数（无更新日则 null）。
+ * 解析 active.md（「进行中」屏 + 「任务」屏 + 雷达停滞行 共用此解析器）。
+ * 锚点：`## T-xxx · 标题` 起条；`- **状态**：` 行定状态（只认这行，不被「迭代记录」里的裸"状态："覆盖）；
+ *   `- **更新**：YYYY-MM-DD` 取更新日；`### 进度节点` 下 `- [ ]/[x]` 数复选框算进度；
+ *   `- **项目**：` 下 `` `路径` — `分支` `` 行收 (仓库,分支) 对，供按分支匹配任务。
+ * 返回 [{ id, title, status:'in_progress'|'pending'|'done'|'other', updatedDays, done, total, links:[{path,branch,key}] }]。
+ * status 里不含"停滞"——停滞是 in_progress + updatedDays≥阈值 派生的，渲染层自己判。
  * @param {string|null} md active.md 原文
  */
 function parseActiveTasks(md) {
     if (!md) return [];
     const out = [];
     let cur = null;
-    const flush = () => { if (cur && cur.inProgress) out.push({ id: cur.id, title: cur.title, updatedDays: cur.updatedDays }); };
+    let inSteps = false, inProjects = false;
+    const flush = () => { if (cur) out.push(cur); };
+    const classify = (s) => {
+        if (/进行中/.test(s)) return 'in_progress';
+        if (/待开始/.test(s)) return 'pending';
+        if (/已完成|完成|已归档/.test(s)) return 'done';
+        return 'other';
+    };
     for (const raw of md.split('\n')) {
         const line = raw.trim();
         const h = line.match(/^##\s+(T-\d+)\s*·\s*(.+?)\s*$/);
-        if (h) { flush(); cur = { id: h[1], title: h[2], inProgress: false, updatedDays: null }; continue; }
+        if (h) { flush(); cur = { id: h[1], title: h[2], status: 'other', updatedDays: null, done: 0, total: 0, links: [] }; inSteps = false; inProjects = false; continue; }
         if (!cur) continue;
-        if (/^-\s*\*\*状态\*\*[：:]/.test(line) && /进行中/.test(line)) cur.inProgress = true;
+        // 段切换：### 进度节点 进入计数；遇到别的 ### 或 ## 退出
+        if (/^###\s+进度节点/.test(line)) { inSteps = true; inProjects = false; continue; }
+        if (/^#{2,3}\s/.test(line)) { inSteps = false; inProjects = false; }
+        // 状态（只认 - **状态**：，避开迭代记录里的裸"状态："）
+        if (/^-\s*\*\*状态\*\*[：:]/.test(line)) cur.status = classify(line);
         const u = line.match(/^-\s*\*\*更新\*\*[：:]\s*(\d{4})-(\d{2})-(\d{2})/);
-        if (u) {
-            const t = new Date(Number(u[1]), Number(u[2]) - 1, Number(u[3])).getTime();
-            cur.updatedDays = Math.floor((Date.now() - t) / 86400000);
+        if (u) { const t = new Date(Number(u[1]), Number(u[2]) - 1, Number(u[3])).getTime(); cur.updatedDays = Math.floor((Date.now() - t) / 86400000); }
+        // 项目段开始
+        if (/^-\s*\*\*项目\*\*[：:]/.test(line)) { inProjects = true; continue; }
+        if (inProjects) {
+            const m = line.match(/^-\s*`([^`]+)`\s*[—–-]\s*`([^`]+)`/); // `路径` — `分支`
+            if (m) cur.links.push({ path: m[1].trim(), branch: m[2].trim(), key: normPath(m[1]) + '@' + m[2].trim() });
+            else if (line && !/^-\s/.test(line)) inProjects = false; // 项目列表结束
+        }
+        // 进度节点复选框计数
+        if (inSteps) {
+            const c2 = line.match(/^-\s*\[( |x|X)\]/);
+            if (c2) { cur.total++; if (c2[1] !== ' ') cur.done++; }
         }
     }
     flush();
@@ -249,12 +277,11 @@ const SEV = { behind: 40, ahead: 30, dirtyStale: 50, error: 60, taskStale: 35 };
 
 /* ────────────────────────── 屏定义 + 帧组装 ────────────────────────── */
 
-// 「任务」屏仅在有 ~/.tasklog/active.md 时出现。行动雷达为默认首屏。
-const BASE_TABS = [['雷达', 'radar'], ['项目', 'projects'], ['守则', 'rules'], ['契约', 'contracts']];
+// 屏序：进行中(默认首屏,项目视角) / 任务(任务视角,仅有 active.md 时) / 项目(纯git) / 守则 / 契约。
+// 原独立「雷达」屏取消——其告警压成「进行中」屏顶部一行。
 function tabsFor(state) {
-    return state?.tasksMd != null
-        ? [['雷达', 'radar'], ['项目', 'projects'], ['任务', 'tasks'], ['守则', 'rules'], ['契约', 'contracts']]
-        : BASE_TABS;
+    const tabs = [['进行中', 'active'], ['任务', 'tasks'], ['项目', 'projects'], ['守则', 'rules'], ['契约', 'contracts']];
+    return state?.tasksMd != null ? tabs : tabs.filter((t) => t[1] !== 'tasks');
 }
 
 let state = null;  // 唯一缓存态；只有 rebuild() 写它，render() 只读它（切屏不碰 git）
@@ -305,100 +332,115 @@ function botLine(innerW, label) { return edgeLine('╰', '╯', innerW, label); 
 /* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
 
 /**
- * 行动雷达（默认首屏，面板的灵魂）：跨所有项目把"需要 boss 动手的"聚成一屏，
- * 按严重度倒序，每条 = 图标 + 项目 + 状况 + 建议动作。数据全 git 派生（不碰人工状态）。
- * 顶部并入精简统计徽章（替代旧总览屏）。空状态 ✓ 一切安好。
- * 注：任务停滞(🕐)类目依赖解析 active.md，属第 2 阶段，此处先做 git 派生三类。
+ * 收集「需关注」告警项（git+任务派生）。原独立雷达屏取消，这些压成「进行中」屏顶部一行。
+ * 返回精简标签数组，如 ['crestrail未提交2·3天', 'shirehub落后5', 'T-017停7天']；无则空数组。
  */
-function viewRadar(innerW) {
-    const ps = state.projects || [];
-    const dirty = ps.filter((p) => p.dirty > 0).length;
-    const feat = ps.reduce((n, p) => n + ((p.branches || []).length), 0);
-    const lines = [];
-    lines.push('');
-    // 顶部精简统计徽章（项目 / 在途分支 / 未提交）
-    lines.push(...statBadges([
-        { label: '项目', value: ps.length, color: c.title },
-        { label: '在途分支', value: feat, color: c.blue },
-        { label: '未提交', value: dirty, color: dirty > 0 ? c.warn : c.green },
-    ]));
-    lines.push('');
-
-    // 收集行动项：{sev, icon, iconColor, proj, desc, action}
-    const items = [];
+function collectAlerts(ps, tasks) {
+    const a = [];
     for (const p of ps) {
-        if (p.error) { items.push({ sev: SEV.error, icon: '✕', iconColor: c.red, proj: p.id, desc: p.error, action: '查路径/仓库' }); continue; }
-        // 未提交 且 停滞
-        if (p.dirty > 0 && p.last && p.last.ageDays != null && p.last.ageDays >= RADAR.STALE_DAYS) {
-            items.push({ sev: SEV.dirtyStale, icon: '◉', iconColor: c.yellow, proj: p.id, desc: `未提交${p.dirty}处·${p.last.ageDays}天没动`, action: '别丢了' });
-        }
-        if (p.ahead >= RADAR.AHEAD_PR) items.push({ sev: SEV.ahead, icon: '↑', iconColor: c.ahead, proj: p.id, desc: `领先主线${p.ahead}没合`, action: '该开 PR' });
-        if (p.behind >= RADAR.BEHIND_REBASE) items.push({ sev: SEV.behind, icon: '↓', iconColor: c.red, proj: p.id, desc: `落后主线${p.behind}`, action: '该 rebase' });
+        if (p.error) { a.push(`${p.id}读不到git`); continue; }
+        if (p.dirty > 0 && p.last && p.last.ageDays != null && p.last.ageDays >= RADAR.STALE_DAYS) a.push(`${p.id}未提交${p.dirty}·${p.last.ageDays}天`);
+        if (p.behind >= RADAR.BEHIND_REBASE) a.push(`${p.id}落后${p.behind}`);
+        if (p.ahead >= RADAR.AHEAD_PR) a.push(`${p.id}领先${p.ahead}没合`);
     }
-    // tvs-task 停滞任务（进行中 且 距更新 ≥ TASK_STALE_DAYS）。
-    // 图标用宽度 1 的 ◔（替 🕐 emoji——emoji 多为宽 2 且不在 isWide 范围，会破坏 [80] 对齐）。
-    for (const t of (state.tasks || [])) {
-        if (t.updatedDays != null && t.updatedDays >= RADAR.TASK_STALE_DAYS) {
-            items.push({ sev: SEV.taskStale, icon: '◔', iconColor: c.mag, proj: t.id, desc: `${clip(t.title, 18)} 停滞${t.updatedDays}天`, action: '推进?' });
-        }
-    }
-    items.sort((a, b) => b.sev - a.sev);
+    for (const t of tasks) if (t.status === 'in_progress' && t.updatedDays != null && t.updatedDays >= RADAR.TASK_STALE_DAYS) a.push(`${t.id}停${t.updatedDays}天`);
+    return a;
+}
 
-    // 首帧空壳（git 还没扫完）：显示"扫描中…"而非"还没建团"，避免 boss 误以为团队没了
+/** 进度展示：done/total → "5/6"，无进度节点 → "–" */
+function progressStr(t) { return t.total > 0 ? `${t.done}/${t.total}` : '–'; }
+
+/**
+ * 屏1「进行中」（默认首屏，项目视角）：只列真正在动的项目（有在途分支 或 有进行中任务的），
+ * 按 项目 → 在途分支 → 该分支对应的 tvs-task 任务 + git 状态 分组。
+ * 任务↔分支匹配：active.md 任务的「项目」字段 (仓库,分支) 按归一路径匹配；匹配不到只显分支+git。
+ * 顶部一行「需关注」告警（仅有异常时冒出），把原雷达压成一行。
+ */
+function viewActive(innerW) {
+    const ps = state.projects || [];
+    const tasks = state.tasks || [];
+    const lines = [];
+
+    // 首帧空壳
     if (state.loading) { lines.push(''); lines.push('  ' + c.dim('扫描中…（首次拉取各项目 git 状态）')); return lines; }
-    if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
-    if (!items.length) { lines.push(''); lines.push('  ' + c.green('✓ 一切安好') + c.dim(' —— 没有需要你动手的事')); return lines; }
 
-    lines.push(' ' + c.dim(`需关注 ${items.length} 项（按紧要度排）`));
-    lines.push(c.gray('  ' + '┄'.repeat(Math.max(0, innerW - 4))));
-    // 列对齐：项目名按最长者补齐
-    const projW = Math.min(16, Math.max(...items.map((it) => dispWidth(it.proj))));
-    for (const it of items) {
-        const left = ' ' + it.iconColor(it.icon) + ' ' + c.bold(padTo(it.proj, projW)) + '  ' + it.desc;
-        lines.push(left + c.dim('  → ') + it.iconColor(it.action));
+    // 顶部告警行（仅有异常时）
+    const alerts = collectAlerts(ps, tasks);
+    if (alerts.length) lines.push(' ' + c.warn('⚠ 需关注 ') + c.warn(clip(alerts.join(' · '), innerW - 10)));
+    else lines.push(' ' + c.green('✓ 一切安好'));
+    lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
+
+    if (!ps.length) { lines.push(''); lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
+
+    // 按分支 key 建任务索引（一个分支可能挂多个任务）
+    const tasksByBranch = new Map();
+    for (const t of tasks) for (const lk of t.links) {
+        if (!tasksByBranch.has(lk.key)) tasksByBranch.set(lk.key, []);
+        tasksByBranch.get(lk.key).push(t);
     }
+
+    // 只列"在动"的项目：有在途分支 的（任务匹配也落在在途分支上）
+    const active = ps.filter((p) => !p.error && p.branches && p.branches.length);
+    if (!active.length) { lines.push(''); lines.push(c.dim(' 暂无在动项目（没有在途功能分支）')); return lines; }
+
+    active.forEach((p, i) => {
+        if (i > 0) lines.push('');
+        lines.push(' ' + c.title(c.bold(p.id)));
+        for (const b of p.branches) {
+            // 分支行：⎇ 名  git状态(↑↓/dirty/最近)
+            const ab = `${p.ahead ? c.ahead('↑' + p.ahead) : c.dim('↑0')}${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
+            const dirtyTag = p.dirty > 0 ? '  ' + c.yellow(`●${p.dirty}改`) : '';
+            const age = b.age ? '  ' + c.time(b.age) : '';
+            lines.push('   ' + c.cyan('⎇ ' + b.name) + '  ' + ab + dirtyTag + age);
+            // 该分支对应任务（归一 key 匹配）
+            const matched = tasksByBranch.get(normPath(p.path) + '@' + b.name) || [];
+            for (const t of matched) {
+                lines.push('     ' + c.dim('└ ') + c.bold(t.id) + ' ' + clip(t.title, innerW - 24) + '  ' + c.mag(taskStatusIcon(t) + progressStr(t)));
+            }
+        }
+    });
     return lines;
 }
 
-/**
- * 把若干指标拼成横排"徽章卡片"（圆角小框），返回 3 行（上框/内容/下框）。
- * 每张卡：╭────────╮ / │ 标签 值 │ / ╰────────╯，值用各自高亮色、标签 dim。
- * 显示宽度按 dispWidth 算（CJK 记 2），保证卡片边框对齐。
- */
-function statBadges(items) {
-    const tops = [], mids = [], bots = [];
-    for (const it of items) {
-        const inner = ` ${it.label} ${it.value} `;       // 卡内文本（无色，量宽用）
-        const w = dispWidth(inner);
-        tops.push('╭' + '─'.repeat(w) + '╮');
-        mids.push('│' + c.dim(' ' + it.label + ' ') + it.color(c.bold(String(it.value))) + ' ' + '│');
-        bots.push('╰' + '─'.repeat(w) + '╯');
-    }
-    const pad = '  ';
-    return [
-        pad + tops.map((t) => c.gray(t)).join('  '),
-        pad + mids.join('  '),
-        pad + bots.map((b) => c.gray(b)).join('  '),
-    ];
+/** 任务状态图标（宽度1，替 emoji）：进行中 ◑ / 停滞 ◔ / 待开始 ○ / 完成 ● / 其他 · */
+function taskStatusIcon(t) {
+    if (t.status === 'in_progress') return t.updatedDays != null && t.updatedDays >= RADAR.TASK_STALE_DAYS ? c.stash('◔') : c.green('◑');
+    if (t.status === 'pending') return c.dim('○');
+    if (t.status === 'done') return c.green('●');
+    return c.dim('·');
 }
 
-/** 总览用的精简项目行（每项目 2~3 行） */
-function projectRowsCompact(p, innerW) {
-    if (p.error) return [` ${c.bold(padTo(p.id, 12))} ${c.red('✕ ' + p.error)}`];
-    const dirtyTag = p.dirty > 0 ? c.yellow(`◉${p.dirty}改`) : c.green('◌干净');
-    const ab = `${p.ahead ? c.ahead('↑' + p.ahead) : c.dim('↑0')}${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
-    const stashTag = p.stash > 0 ? '  ' + c.stash('⊘' + p.stash + '藏') : '';
-    const head = ` ${c.bold(padTo(p.id, 12))} ${c.cyan('⎇' + padTo(p.branch, 12))} ${dirtyTag}  ${ab}${stashTag}`;
-    const rows = [head];
-    if (p.branches && p.branches.length) {
-        const shown = p.branches.slice(0, 2).map((b) => b.name).join('·');
-        const more = p.branches.length > 2 ? `…(+${p.branches.length - 2})` : '';
-        rows.push(c.dim('  ▸ ') + c.blue(clip(shown + more, innerW - 7)));
+/**
+ * 屏2「任务」（任务视角，清爽版）：复用 parseActiveTasks，不堆原文，结构化行按状态分组。
+ * 每条：ID·标题·进度·项目（首个关联仓库名）。停滞 = 进行中且距更新≥阈值，单独分组。
+ */
+function viewTasks(innerW) {
+    const tasks = state.tasks || [];
+    if (!tasks.length) return [c.dim(' active.md 里没有任务')];
+    const isStale = (t) => t.status === 'in_progress' && t.updatedDays != null && t.updatedDays >= RADAR.TASK_STALE_DAYS;
+    // 分组：进行中(非停滞) / 停滞 / 待开始 / 其他
+    const groups = [
+        ['◑ 进行中', c.green, tasks.filter((t) => t.status === 'in_progress' && !isStale(t))],
+        ['◔ 停滞', c.stash, tasks.filter(isStale)],
+        ['○ 待开始', c.dim, tasks.filter((t) => t.status === 'pending')],
+    ];
+    const other = tasks.filter((t) => t.status === 'other' || t.status === 'done');
+    if (other.length) groups.push(['· 其他', c.dim, other]);
+
+    // 项目名 = 首个关联仓库的末段目录（无关联→—）
+    const projOf = (t) => t.links.length ? (t.links[0].path.split(/[\\/]+/).filter(Boolean).pop() || '—') : '—';
+    const lines = [];
+    for (const [title, col, items] of groups) {
+        if (!items.length) continue;
+        lines.push('');
+        lines.push(' ' + col(title) + c.dim(`（${items.length}）`));
+        for (const t of items) {
+            const prog = isStale(t) ? `停${t.updatedDays}天` : progressStr(t);
+            const row = ` ${c.bold(padTo(t.id, 7))} ${padTo(clip(t.title, 28), 28)} ${c.dim(padTo(prog, 7))} ${c.cyan(projOf(t))}`;
+            lines.push(row);
+        }
     }
-    if (p.last && p.last.msg) {
-        rows.push(c.dim('  最近 ') + clip(`${p.last.msg}·${p.last.when || ''}·${p.last.who || ''}`, innerW - 7));
-    }
-    return rows;
+    return lines.length ? lines : [c.dim(' （空）')];
 }
 
 /** 项目屏：每项目完整信息（分支·主分支·dirty·ahead/behind·stash·在途分支+各自活跃时间·最近提交） */
@@ -435,36 +477,16 @@ function viewProjects(innerW) {
     return lines;
 }
 
-/**
- * 行内 markdown 标记 → ANSI：双星/双下划线粗体 → 去标记并加 ANSI 粗体；
- * 单下划线/单星斜体 → 去标记；反引号 code → 去反引号。emoji 原样保留。
- * 仅「任务」屏用（rich=true），守则/契约保持纯轻量不动。
- */
-function mdInline(s) {
-    return s
-        .replace(/^\[ \]\s*/, c.dim('◌ '))                       // - [ ] 未完成 → ◌
-        .replace(/^\[[xX]\]\s*/, c.green('✓ '))                  // - [x] 完成 → ✓
-        .replace(/\*\*(.+?)\*\*/g, (_, t) => c.bold(t))
-        .replace(/__(.+?)__/g, (_, t) => c.bold(t))
-        .replace(/(?<![A-Za-z0-9])[_*](?=\S)(.+?)(?<=\S)[_*](?![A-Za-z0-9])/g, '$1') // _斜体_ / *斜体*
-        .replace(/`([^`]+)`/g, '$1');
-}
-
-/**
- * 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段。
- * @param {boolean} rich 富渲染开关：true 时额外处理行内粗体/斜体/code 与 --- 分隔线（仅任务屏）。
- */
-function viewMarkdown(md, innerW, rich = false) {
+/** 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段。守则/契约用（纯文件原文，轻量渲染）。 */
+function viewMarkdown(md, innerW) {
     const lines = [];
-    const inline = rich ? mdInline : (s) => s;
     for (const raw of (md || '').split('\n')) {
         const l = raw.trimEnd();
-        if (rich && /^\s*---+\s*$/.test(l)) lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2)))); // --- → 分隔线
-        else if (/^##\s+/.test(l)) { lines.push(''); lines.push(' ' + c.cyan(c.bold(inline(l.replace(/^##\s+/, ''))))); }
-        else if (/^#\s+/.test(l)) { lines.push(' ' + c.bold(inline(l.replace(/^#\s+/, '')))); }
-        else if (/^[-*]\s+/.test(l)) lines.push(c.dim('  • ') + inline(l.replace(/^[-*]\s+/, '')));
+        if (/^##\s+/.test(l)) { lines.push(''); lines.push(' ' + c.cyan(c.bold(l.replace(/^##\s+/, '')))); }
+        else if (/^#\s+/.test(l)) lines.push(' ' + c.bold(l.replace(/^#\s+/, '')));
+        else if (/^[-*]\s+/.test(l)) lines.push(c.dim('  • ') + l.replace(/^[-*]\s+/, ''));
         else if (l === '') lines.push('');
-        else lines.push(c.dim(' ') + inline(l));
+        else lines.push(c.dim(' ') + l);
     }
     return lines.length ? lines : [c.dim(' （空）')];
 }
@@ -478,11 +500,11 @@ function frame() {
 
     let body;
     const key = tabs[cur][1];
-    if (key === 'radar') body = viewRadar(innerW);
-    else if (key === 'projects') body = viewProjects(innerW);
+    if (key === 'active') body = viewActive(innerW);          // 进行中（项目视角）
+    else if (key === 'tasks') body = viewTasks(innerW);       // 任务（任务视角，清爽）
+    else if (key === 'projects') body = viewProjects(innerW); // 项目（纯 git）
     else if (key === 'rules') body = viewMarkdown(state.rulesMd, innerW);
-    else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
-    else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
+    else body = viewMarkdown(state.contractsMd, innerW);      // 契约
 
     const foot = ' ' + c.dim('←→/1-' + tabs.length + '切屏 · ↑↓/jk滚动 · PgUp/PgDn翻页 · g/G首尾 · q退出');
 
@@ -541,8 +563,9 @@ function dataSig(s) {
         ? `${p.id}!err`
         : `${p.id}|${p.branch}|${p.dirty}|${p.ahead}|${p.behind}|${p.stash}|${(p.branches || []).map((b) => b.name + b.age).join(',')}|${p.last && p.last.msg}|${p.last && p.last.when}`
     ).join('；');
-    const tasks = (s.tasks || []).map((t) => `${t.id}:${t.updatedDays}`).join(',');
-    return proj + '∥' + tasks + '∥' + (s.rulesMd || '').length + '∥' + (s.contractsMd || '').length + '∥' + (s.tasksMd || '').length;
+    // 任务签名含 状态/进度/停滞天数——[ ]→[x] 这类等长改动靠 done/total 捕获（光看 tasksMd.length 抓不到）
+    const tasks = (s.tasks || []).map((t) => `${t.id}:${t.status}:${t.done}/${t.total}:${t.updatedDays}`).join(',');
+    return proj + '∥' + tasks + '∥' + (s.rulesMd || '').length + '∥' + (s.contractsMd || '').length;
 }
 
 let scanning = false;      // 重扫互斥：异步扫 >2s 时定时器再来不叠加
