@@ -255,9 +255,15 @@ function viewOverview(innerW) {
     const dirty = ps.filter((p) => p.dirty > 0).length;
     const feat = ps.reduce((n, p) => n + ((p.branches || []).length), 0);
     const lines = [];
-    // 三个数（都是 git 能算准的）：项目 / 在途分支 / 未提交
-    const stat = `${c.bold('项目' + ps.length)}    ${c.bold('在途分支' + feat)}    ${c.bold('未提交' + dirty)}`;
-    lines.push(' ' + stat);
+    // 顶部呼吸感
+    lines.push('');
+    // 四个核心数做成有视觉重量的"徽章卡片"：项目 / 在途分支 / 未提交（dirty 非 0 用金黄强调）
+    lines.push(...statBadges([
+        { label: '项目', value: ps.length, color: c.title },
+        { label: '在途分支', value: feat, color: c.blue },
+        { label: '未提交', value: dirty, color: dirty > 0 ? c.warn : c.green },
+    ]));
+    lines.push('');
     // 告警行：仅当有 dirty / behind 时显示一行金黄；无异常不显示
     const flags = ps
         .filter((p) => !p.error && (p.dirty > 0 || p.behind > 0))
@@ -267,11 +273,34 @@ function viewOverview(innerW) {
             if (p.dirty > 0) bits.push('◉' + p.dirty + '改');
             return `${p.id}(${bits.join(' ')})`;
         });
-    if (flags.length) lines.push(' ' + c.warn('⚠ 需关注 ' + clip(flags.join(' · '), innerW - 8)));
-    lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
+    if (flags.length) lines.push(' ' + c.warn('⚠ 需关注 ') + c.warn(clip(flags.join(' · '), innerW - 10)));
+    lines.push(c.gray('  ' + '┄'.repeat(Math.max(0, innerW - 4))));
     if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
+    lines.push('');
     for (const p of ps) lines.push(...projectRowsCompact(p, innerW));
     return lines;
+}
+
+/**
+ * 把若干指标拼成横排"徽章卡片"（圆角小框），返回 3 行（上框/内容/下框）。
+ * 每张卡：╭────────╮ / │ 标签 值 │ / ╰────────╯，值用各自高亮色、标签 dim。
+ * 显示宽度按 dispWidth 算（CJK 记 2），保证卡片边框对齐。
+ */
+function statBadges(items) {
+    const tops = [], mids = [], bots = [];
+    for (const it of items) {
+        const inner = ` ${it.label} ${it.value} `;       // 卡内文本（无色，量宽用）
+        const w = dispWidth(inner);
+        tops.push('╭' + '─'.repeat(w) + '╮');
+        mids.push('│' + c.dim(' ' + it.label + ' ') + it.color(c.bold(String(it.value))) + ' ' + '│');
+        bots.push('╰' + '─'.repeat(w) + '╯');
+    }
+    const pad = '  ';
+    return [
+        pad + tops.map((t) => c.gray(t)).join('  '),
+        pad + mids.join('  '),
+        pad + bots.map((b) => c.gray(b)).join('  '),
+    ];
 }
 
 /** 总览用的精简项目行（每项目 2~3 行） */
@@ -376,7 +405,7 @@ function frame() {
     else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
     else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
 
-    const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · ↑↓/jk滚动 · PgUp/PgDn翻页 · g/G首尾 · q退出');
+    const foot = ' ' + c.dim('←→/1-' + tabs.length + '切屏 · ↑↓/jk滚动 · PgUp/PgDn翻页 · g/G首尾 · q退出');
 
     // 高度预算：终端行数 - 标题(1) - tab(1) - 上框(1) - 下框(1) - 底提示(1) = -5
     const rows = out.rows || 24;
@@ -476,10 +505,13 @@ function onKey(str, key) {
         render(); // 纯缓存重绘，不碰 git → 切屏零延迟
         return;
     }
-    // 纵向滚动：↑/k 上一行、↓/j 下一行、PgUp/PgDn 翻页、g/Home 顶、G/End 底。
-    // 全部乐观增减，越界由 frame() 夹紧（END 用大数顶到底，clamp 会收）。
+    // 键位分工（符合直觉、不打架）：横向键管 tab、纵向键管滚动。
+    // ←/→ 上一屏/下一屏（循环，切屏归零滚动）；↑↓ 或 j/k 滚一行；PgUp/PgDn 翻页；g/G 顶底；r 手刷。
+    // 滚动全部乐观增减，越界由 frame() 夹紧（END 用大数顶到底，clamp 会收）。
     const page = Math.max(1, (out.rows || 24) - 7);
-    if (key.name === 'up' || str === 'k') { scroll -= 1; render(); }
+    if (key.name === 'left') { cur = (cur - 1 + tabs.length) % tabs.length; scroll = 0; render(); }
+    else if (key.name === 'right') { cur = (cur + 1) % tabs.length; scroll = 0; render(); }
+    else if (key.name === 'up' || str === 'k') { scroll -= 1; render(); }
     else if (key.name === 'down' || str === 'j') { scroll += 1; render(); }
     else if (key.name === 'pageup') { scroll -= page; render(); }
     else if (key.name === 'pagedown') { scroll += page; render(); }
