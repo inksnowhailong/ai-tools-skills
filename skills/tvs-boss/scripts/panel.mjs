@@ -80,9 +80,11 @@ function gitSnapshot(p) {
     // stash 数：一次 stash list 计数
     const stashOut = git(p.path, 'stash list') || '';
     const stash = stashOut ? stashOut.split('\n').filter(Boolean).length : 0;
-    const last = git(p.path, 'log -1 --format="%s|%cr|%an"') || '';
-    const [msg, when, who] = last.split('|');
-    return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who } };
+    // 用 \x1f(单元分隔符)分隔，避免提交标题里的 | 把字段串位；%ct 给机器可读时间（雷达算"几天没动"）
+    const last = git(p.path, 'log -1 --format="%s%x1f%cr%x1f%an%x1f%ct"') || '';
+    const [msg, when, who, ct] = last.split('\x1f');
+    const ageDays = ct ? Math.floor((Date.now() / 1000 - Number(ct)) / 86400) : null;
+    return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who, ageDays } };
 }
 
 /** 读 tvs-task 的任务表（~/.tasklog/active.md），任务屏用。无文件则返回 null（屏不出现）。 */
@@ -195,12 +197,24 @@ function padTo(str, width) {
     return clipped + ' '.repeat(Math.max(0, gap));
 }
 
+/* ────────────────────────── 行动雷达阈值（一处可调，boss 按需改）────────────────────────── */
+// 这些是"需关注"的触发线；都是 git 派生量，改一个常量即调灵敏度。
+const RADAR = {
+    STALE_DAYS: 2,   // 有未提交改动 且 距上次提交 ≥ 这么多天 → 提醒"别丢了"
+    AHEAD_PR: 1,     // 分支领先主线 ≥ 这么多提交没合 → 提醒"该开 PR"
+    BEHIND_REBASE: 1,// 落后主线 ≥ 这么多 → 提醒"该 rebase"
+};
+// 各类目严重度（数值越大越靠前）；排序与配色都用它，调顺序改这里即可。
+const SEV = { behind: 40, ahead: 30, dirtyStale: 50, error: 60 };
+
 /* ────────────────────────── 屏定义 + 帧组装 ────────────────────────── */
 
-// 「任务」屏（末屏）仅在有 ~/.tasklog/active.md 时出现
-const BASE_TABS = [['总览', 'overview'], ['项目', 'projects'], ['守则', 'rules'], ['契约', 'contracts']];
+// 「任务」屏仅在有 ~/.tasklog/active.md 时出现。行动雷达为默认首屏。
+const BASE_TABS = [['雷达', 'radar'], ['项目', 'projects'], ['守则', 'rules'], ['契约', 'contracts']];
 function tabsFor(state) {
-    return state?.tasksMd != null ? [...BASE_TABS, ['任务', 'tasks']] : BASE_TABS;
+    return state?.tasksMd != null
+        ? [['雷达', 'radar'], ['项目', 'projects'], ['任务', 'tasks'], ['守则', 'rules'], ['契约', 'contracts']]
+        : BASE_TABS;
 }
 
 let state = null;  // 唯一缓存态；只有 rebuild() 写它，render() 只读它（切屏不碰 git）
@@ -250,34 +264,50 @@ function botLine(innerW, label) { return edgeLine('╰', '╯', innerW, label); 
 
 /* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
 
-function viewOverview(innerW) {
+/**
+ * 行动雷达（默认首屏，面板的灵魂）：跨所有项目把"需要 boss 动手的"聚成一屏，
+ * 按严重度倒序，每条 = 图标 + 项目 + 状况 + 建议动作。数据全 git 派生（不碰人工状态）。
+ * 顶部并入精简统计徽章（替代旧总览屏）。空状态 ✓ 一切安好。
+ * 注：任务停滞(🕐)类目依赖解析 active.md，属第 2 阶段，此处先做 git 派生三类。
+ */
+function viewRadar(innerW) {
     const ps = state.projects || [];
     const dirty = ps.filter((p) => p.dirty > 0).length;
     const feat = ps.reduce((n, p) => n + ((p.branches || []).length), 0);
     const lines = [];
-    // 顶部呼吸感
     lines.push('');
-    // 四个核心数做成有视觉重量的"徽章卡片"：项目 / 在途分支 / 未提交（dirty 非 0 用金黄强调）
+    // 顶部精简统计徽章（项目 / 在途分支 / 未提交）
     lines.push(...statBadges([
         { label: '项目', value: ps.length, color: c.title },
         { label: '在途分支', value: feat, color: c.blue },
         { label: '未提交', value: dirty, color: dirty > 0 ? c.warn : c.green },
     ]));
     lines.push('');
-    // 告警行：仅当有 dirty / behind 时显示一行金黄；无异常不显示
-    const flags = ps
-        .filter((p) => !p.error && (p.dirty > 0 || p.behind > 0))
-        .map((p) => {
-            const bits = [];
-            if (p.behind > 0) bits.push('↓' + p.behind);
-            if (p.dirty > 0) bits.push('◉' + p.dirty + '改');
-            return `${p.id}(${bits.join(' ')})`;
-        });
-    if (flags.length) lines.push(' ' + c.warn('⚠ 需关注 ') + c.warn(clip(flags.join(' · '), innerW - 10)));
-    lines.push(c.gray('  ' + '┄'.repeat(Math.max(0, innerW - 4))));
+
+    // 收集行动项：{sev, icon, iconColor, proj, desc, action}
+    const items = [];
+    for (const p of ps) {
+        if (p.error) { items.push({ sev: SEV.error, icon: '✕', iconColor: c.red, proj: p.id, desc: p.error, action: '查路径/仓库' }); continue; }
+        // 未提交 且 停滞
+        if (p.dirty > 0 && p.last && p.last.ageDays != null && p.last.ageDays >= RADAR.STALE_DAYS) {
+            items.push({ sev: SEV.dirtyStale, icon: '◉', iconColor: c.yellow, proj: p.id, desc: `未提交${p.dirty}处·${p.last.ageDays}天没动`, action: '别丢了' });
+        }
+        if (p.ahead >= RADAR.AHEAD_PR) items.push({ sev: SEV.ahead, icon: '↑', iconColor: c.ahead, proj: p.id, desc: `领先主线${p.ahead}没合`, action: '该开 PR' });
+        if (p.behind >= RADAR.BEHIND_REBASE) items.push({ sev: SEV.behind, icon: '↓', iconColor: c.red, proj: p.id, desc: `落后主线${p.behind}`, action: '该 rebase' });
+    }
+    items.sort((a, b) => b.sev - a.sev);
+
     if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
-    lines.push('');
-    for (const p of ps) lines.push(...projectRowsCompact(p, innerW));
+    if (!items.length) { lines.push(''); lines.push('  ' + c.green('✓ 一切安好') + c.dim(' —— 没有需要你动手的事')); return lines; }
+
+    lines.push(' ' + c.dim(`需关注 ${items.length} 项（按紧要度排）`));
+    lines.push(c.gray('  ' + '┄'.repeat(Math.max(0, innerW - 4))));
+    // 列对齐：项目名按最长者补齐
+    const projW = Math.min(16, Math.max(...items.map((it) => dispWidth(it.proj))));
+    for (const it of items) {
+        const left = ' ' + it.iconColor(it.icon) + ' ' + c.bold(padTo(it.proj, projW)) + '  ' + it.desc;
+        lines.push(left + c.dim('  → ') + it.iconColor(it.action));
+    }
     return lines;
 }
 
@@ -399,7 +429,7 @@ function frame() {
 
     let body;
     const key = tabs[cur][1];
-    if (key === 'overview') body = viewOverview(innerW);
+    if (key === 'radar') body = viewRadar(innerW);
     else if (key === 'projects') body = viewProjects(innerW);
     else if (key === 'rules') body = viewMarkdown(state.rulesMd, innerW);
     else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
