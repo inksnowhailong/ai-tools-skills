@@ -27,7 +27,18 @@ description: 多项目 AI 开发"老板/团队"系统——把你从挨个手动
 3. 问一句团队**守则**有没有要先立的（如"push/合主线必先确认"），写进 `.tvs-boss/rules.md`；没有就留空模板。
 4. 宣布"团队就位，我是 leader，下需求吧"。
 
-### 4. 成为 leader
+### 4. 生成面板启动器（建团 / 恢复 都做，幂等）
+定位到团队根后，生成「一键启动器」到团队根，让用户初始化后就地双击即开面板：
+
+```
+node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
+```
+
+- 往 `<团队根>/.tvs-boss/` 写 `panel.cmd`（Windows）和 `panel.command`（mac）；已存在直接覆盖（内容由当前 `$SKILL` 路径决定，覆盖即随 skill 安装位置刷新，幂等）。
+- 启动器自定位团队根、panel.mjs 路径生成时填入，零硬编码盘符——这就是它必须"按团队生成"而非塞进 skill 源码的原因。
+- 告诉用户："面板启动器已就位，双击 `<团队根>\.tvs-boss\panel.cmd`（mac 为 `panel.command`）即可开看板。"
+
+### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
 ## 核心铁律（已焊死）
@@ -46,5 +57,5 @@ description: 多项目 AI 开发"老板/团队"系统——把你从挨个手动
 - `references/architecture.md` —— 整体形状 + 决策。
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），leader spawn 时读它取 systemPrompt + 模型档。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，终端里看 总览/项目/团队/守则/契约（键盘 1~5 切屏，←→ 也切，q/Ctrl+C 退出；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」，富 markdown 渲染干净）。`--root` 显式指定团队根，不依赖 cwd。
-- `panel.cmd` —— **一键启动器**：双击即开 cmd 窗口跑面板（自包含，显式传 `--root E:\`，无需先 cd）。PowerShell 等效：`node "E:\inksnow\tvs\AIConfig\skills\tvs-boss\scripts\panel.mjs" --root "E:\"`。
+- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，终端里看 总览/项目/团队/守则/契约（键盘 1~5 切屏，←→ 也切，q/Ctrl+C 退出；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」，富 markdown 渲染干净）。`--root` 接 团队根 / `.tvs-boss` 目录 / 其下子目录 都能正确解析，不依赖 cwd。
+- `scripts/make-launcher.mjs` —— **启动器生成器**：`node scripts/make-launcher.mjs --root <团队根>`，往 `<团队根>/.tvs-boss/` 生成双击即用的一键启动器（Windows `panel.cmd` + mac `panel.command`）。启动器弹一个正经终端窗口（Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app）跑 TUI，ANSI 正常、可键盘交互；团队根靠启动器自定位、panel.mjs 路径生成时填入，零硬编码。**启动器是按团队生成的运行态产物，落在团队根、不进 skill 源码**（见启动协议第 5 步）。

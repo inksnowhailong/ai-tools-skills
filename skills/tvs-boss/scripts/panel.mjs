@@ -16,7 +16,7 @@
  *   不传则从当前目录向上自动探测。配套一键启动器见同级目录 panel.cmd（双击即开）。
  */
 import { readFileSync, existsSync, watch } from 'node:fs';
-import { join, parse as parsePath } from 'node:path';
+import { join, parse as parsePath, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import readline from 'node:readline';
@@ -442,11 +442,15 @@ function onKey(str, key) {
 
 function main() {
     // --root <path>：显式指定团队根（不依赖启动时 cwd，启动器/双击最稳）。
-    // 优先级：--root 显式值（须含 .tvs-boss）> 向上自动探测。
+    // 三种入参都接：① 团队根本身（含 .tvs-boss/）② 直接给 .tvs-boss 目录 ③ 其下任意子目录（向上探测）。
+    // 优先级：--root 解析值 > 向上自动探测。结果一律 resolve 成绝对路径，避免出现 E:\.tvs-boss\.. 这类相对残留。
     const rootArg = process.argv.indexOf('--root');
     const explicit = rootArg > -1 ? process.argv[rootArg + 1] : null;
     if (explicit) {
-        teamRoot = existsSync(join(explicit, '.tvs-boss')) ? explicit : findTeamRoot(explicit);
+        const abs = resolve(explicit);
+        if (parsePath(abs).base === '.tvs-boss') teamRoot = parsePath(abs).dir;   // ② 给的是 .tvs-boss 目录
+        else if (existsSync(join(abs, '.tvs-boss'))) teamRoot = abs;              // ① 给的是团队根
+        else teamRoot = findTeamRoot(abs);                                       // ③ 子目录，向上找
     } else {
         teamRoot = findTeamRoot();
     }
