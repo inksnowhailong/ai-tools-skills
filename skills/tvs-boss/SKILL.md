@@ -46,4 +46,5 @@ description: 多项目 AI 开发"老板/团队"系统——把你从挨个手动
 - `references/architecture.md` —— 整体形状 + 决策。
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），leader spawn 时读它取 systemPrompt + 模型档。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs`，终端里看 总览/项目/团队/守则/契约（键盘 1~5 切屏，←→ 也切，q/Ctrl+C 退出；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」）。
+- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，终端里看 总览/项目/团队/守则/契约（键盘 1~5 切屏，←→ 也切，q/Ctrl+C 退出；fs 变即时刷 + 每 2s 现场 git 推；有 ~/.tasklog/active.md 时多出第 6 屏「任务」，富 markdown 渲染干净）。`--root` 显式指定团队根，不依赖 cwd。
+- `panel.cmd` —— **一键启动器**：双击即开 cmd 窗口跑面板（自包含，显式传 `--root E:\`，无需先 cd）。PowerShell 等效：`node "E:\inksnow\tvs\AIConfig\skills\tvs-boss\scripts\panel.mjs" --root "E:\"`。

@@ -11,7 +11,9 @@
  * 数据引擎（findTeamRoot / readMem / readLiveAgents / parseProjects / git / gitSnapshot / buildState）
  *   逻辑与 v3 完全一致，只换渲染层和交互层。
  *
- * 用法：node panel.mjs
+ * 用法：node panel.mjs [--root <团队根路径>]
+ *   --root 显式指定团队根（含 .tvs-boss/），不依赖启动时 cwd —— 启动器/双击场景用它最稳。
+ *   不传则从当前目录向上自动探测。配套一键启动器见同级目录 panel.cmd（双击即开）。
  */
 import { readFileSync, existsSync, watch } from 'node:fs';
 import { join, parse as parsePath } from 'node:path';
@@ -289,16 +291,34 @@ function viewTeam(innerW) {
     return lines;
 }
 
-/** 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段 */
-function viewMarkdown(md, innerW) {
+/**
+ * 行内 markdown 标记 → ANSI：双星/双下划线粗体 → 去标记并加 ANSI 粗体；
+ * 单下划线/单星斜体 → 去标记；反引号 code → 去反引号。emoji 原样保留。
+ * 仅第 6 屏「任务」用（rich=true），守则/契约保持纯轻量不动。
+ */
+function mdInline(s) {
+    return s
+        .replace(/\*\*(.+?)\*\*/g, (_, t) => c.bold(t))
+        .replace(/__(.+?)__/g, (_, t) => c.bold(t))
+        .replace(/(?<![A-Za-z0-9])[_*](?=\S)(.+?)(?<=\S)[_*](?![A-Za-z0-9])/g, '$1') // _斜体_ / *斜体*
+        .replace(/`([^`]+)`/g, '$1');
+}
+
+/**
+ * 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段。
+ * @param {boolean} rich 富渲染开关：true 时额外处理行内粗体/斜体/code 与 --- 分隔线（仅任务屏）。
+ */
+function viewMarkdown(md, innerW, rich = false) {
     const lines = [];
+    const inline = rich ? mdInline : (s) => s;
     for (const raw of (md || '').split('\n')) {
         const l = raw.trimEnd();
-        if (/^##\s+/.test(l)) { lines.push(''); lines.push(' ' + c.cyan(c.bold(l.replace(/^##\s+/, '')))); }
-        else if (/^#\s+/.test(l)) { lines.push(' ' + c.bold(l.replace(/^#\s+/, ''))); }
-        else if (/^[-*]\s+/.test(l)) lines.push(c.dim('  • ') + l.replace(/^[-*]\s+/, ''));
+        if (rich && /^\s*---+\s*$/.test(l)) lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2)))); // --- → 分隔线
+        else if (/^##\s+/.test(l)) { lines.push(''); lines.push(' ' + c.cyan(c.bold(inline(l.replace(/^##\s+/, ''))))); }
+        else if (/^#\s+/.test(l)) { lines.push(' ' + c.bold(inline(l.replace(/^#\s+/, '')))); }
+        else if (/^[-*]\s+/.test(l)) lines.push(c.dim('  • ') + inline(l.replace(/^[-*]\s+/, '')));
         else if (l === '') lines.push('');
-        else lines.push(c.dim(' ' + l));
+        else lines.push(c.dim(' ') + inline(l));
     }
     return lines.length ? lines : [c.dim(' （空）')];
 }
@@ -317,7 +337,7 @@ function frame() {
     else if (key === 'team') body = viewTeam(innerW);
     else if (key === 'rules') body = viewMarkdown(state.rulesMd, innerW);
     else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
-    else body = viewMarkdown(state.tasksMd, innerW);
+    else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
 
     const head = header(tabs, innerW);
     const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · q退出 · 每2s现场git推 · fs变即时刷');
@@ -421,9 +441,17 @@ function onKey(str, key) {
 /* ────────────────────────── 主流程 ────────────────────────── */
 
 function main() {
-    teamRoot = findTeamRoot();
+    // --root <path>：显式指定团队根（不依赖启动时 cwd，启动器/双击最稳）。
+    // 优先级：--root 显式值（须含 .tvs-boss）> 向上自动探测。
+    const rootArg = process.argv.indexOf('--root');
+    const explicit = rootArg > -1 ? process.argv[rootArg + 1] : null;
+    if (explicit) {
+        teamRoot = existsSync(join(explicit, '.tvs-boss')) ? explicit : findTeamRoot(explicit);
+    } else {
+        teamRoot = findTeamRoot();
+    }
     if (!teamRoot) {
-        console.error('没找到团队根（向上没发现 .tvs-boss/）。先在项目目录跑 /tvs-boss 建团。');
+        console.error('没找到团队根（向上没发现 .tvs-boss/）。先在项目目录跑 /tvs-boss 建团，或用 --root <团队根路径> 指定。');
         process.exit(1);
     }
 
