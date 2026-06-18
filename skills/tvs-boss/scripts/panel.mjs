@@ -332,7 +332,7 @@ function botLine(innerW, label) { return edgeLine('╰', '╯', innerW, label); 
 /* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
 
 /**
- * 收集「需关注」告警项（git+任务派生）。原独立雷达屏取消，这些压成「进行中」屏顶部一行。
+ * 收集「需关注」告警项（git+任务派生）。原独立雷达屏取消，这些列在「进行中」屏顶部（逐条一行、不截断）。
  * 返回精简标签数组，如 ['crestrail未提交2·3天', 'shirehub落后5', 'T-017停7天']；无则空数组。
  */
 function collectAlerts(ps, tasks) {
@@ -354,7 +354,7 @@ function progressStr(t) { return t.total > 0 ? `${t.done}/${t.total}` : '–'; }
  * 屏1「进行中」（默认首屏，项目视角）：只列真正在动的项目（有在途分支 或 有进行中任务的），
  * 按 项目 → 在途分支 → 该分支对应的 tvs-task 任务 + git 状态 分组。
  * 任务↔分支匹配：active.md 任务的「项目」字段 (仓库,分支) 按归一路径匹配；匹配不到只显分支+git。
- * 顶部一行「需关注」告警（仅有异常时冒出），把原雷达压成一行。
+ * 顶部「需关注」告警（仅有异常时冒出，逐条一行完整列出、不截断），把原雷达并入此处。
  */
 function viewActive(innerW) {
     const ps = state.projects || [];
@@ -364,10 +364,14 @@ function viewActive(innerW) {
     // 首帧空壳
     if (state.loading) { lines.push(''); lines.push('  ' + c.dim('扫描中…（首次拉取各项目 git 状态）')); return lines; }
 
-    // 顶部告警行（仅有异常时）
+    // 顶部告警：完整逐条列出、不截断（含数量头）。超屏由整屏滚动兜住。
     const alerts = collectAlerts(ps, tasks);
-    if (alerts.length) lines.push(' ' + c.warn('⚠ 需关注 ') + c.warn(clip(alerts.join(' · '), innerW - 10)));
-    else lines.push(' ' + c.green('✓ 一切安好'));
+    if (alerts.length) {
+        lines.push(' ' + c.warn(`⚠ 需关注（${alerts.length}）`));
+        for (const a of alerts) lines.push('   ' + c.warn('· ') + c.warn(clip(a, innerW - 5)));
+    } else {
+        lines.push(' ' + c.green('✓ 一切安好'));
+    }
     lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
 
     if (!ps.length) { lines.push(''); lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
