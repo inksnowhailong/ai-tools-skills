@@ -71,11 +71,18 @@ function gitSnapshot(p) {
     let ahead = 0, behind = 0;
     const lr = git(p.path, `rev-list --left-right --count ${p.main}...HEAD`);
     if (lr) { const [b, a] = lr.split(/\s+/).map(Number); behind = b || 0; ahead = a || 0; }
-    const branches = (git(p.path, 'branch --format=%(refname:short)') || '')
-        .split('\n').map((s) => s.trim()).filter((s) => s && s !== p.main);
+    // 一次 for-each-ref 同时拿到 在途分支 + 各自最近活跃时间（按时间倒序），避免每分支再 git log（省 N 次 execSync）
+    const refLines = (git(p.path, 'for-each-ref --sort=-committerdate refs/heads/ --format="%(refname:short)|%(committerdate:relative)"') || '')
+        .split('\n').map((s) => s.trim()).filter(Boolean);
+    const branches = refLines
+        .map((l) => { const [name, age] = l.split('|'); return { name, age }; })
+        .filter((b) => b.name && b.name !== p.main);
+    // stash 数：一次 stash list 计数
+    const stashOut = git(p.path, 'stash list') || '';
+    const stash = stashOut ? stashOut.split('\n').filter(Boolean).length : 0;
     const last = git(p.path, 'log -1 --format="%s|%cr|%an"') || '';
     const [msg, when, who] = last.split('|');
-    return { ...p, branch, dirty, ahead, behind, branches, last: { msg, when, who } };
+    return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who } };
 }
 
 /** 读 tvs-task 的任务表（~/.tasklog/active.md），任务屏用。无文件则返回 null（屏不出现）。 */
@@ -103,21 +110,26 @@ const out = process.stdout;
 const COLOR = out.isTTY && !process.env.NO_COLOR; // 不支持色彩或显式关色时降级为无色
 const COLS = () => out.columns || 80;             // 终端列数，随窗口变
 
-// ANSI 颜色：用 256-color 低饱和柔和色号，护眼不刺眼；关色时全部返回原文，保证无色终端可读。
-// 取舍：避开纯绿(2)/纯红(1)/纯青(6) 这类高亮原色，改用灰调中间色——状态仍可区分，长时间看不累。
+// ANSI 颜色：Tokyo Night 变体，256-color 低饱和护眼调色板；关色时全部返回原文，保证无色终端可读。
 const fg = (n) => (s) => (COLOR ? `\x1b[38;5;${n}m${s}\x1b[0m` : s);
 const c = {
     reset: COLOR ? '\x1b[0m' : '',
-    dim: (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s),
+    dim: (s) => (COLOR ? `\x1b[38;5;242m${s}\x1b[0m` : s),
     bold: (s) => (COLOR ? `\x1b[1m${s}\x1b[0m` : s),
-    cyan: fg(109),    // 柔和青（分支/强调）
-    green: fg(108),   // 柔和绿（干净/ahead）
-    yellow: fg(179),  // 柔和琥珀（有改动）
-    red: fg(167),     // 柔和砖红（behind/错误）
-    blue: fg(110),    // 柔和蓝（在途分支）
-    mag: fg(139),     // 柔和紫（角色）
-    gray: fg(245),    // 中性灰（框线/次要）
-    invCyan: (s) => (COLOR ? `\x1b[48;5;109m\x1b[38;5;235m${s}\x1b[0m` : `[${s}]`), // 选中 tab：柔和青底+深字
+    title: fg(111),   // 蓝紫 标题/◆
+    cyan: fg(110),    // 柔蓝 分支⎇
+    green: fg(114),   // 薄荷绿 ◌干净
+    ahead: fg(150),   // 草绿 ↑领先
+    yellow: fg(179),  // 琥珀 ◉改
+    red: fg(167),     // 砖红 ↓落后/错误
+    blue: fg(146),    // 薰衣草 在途分支
+    mag: fg(183),     // 淡紫 角色
+    gray: fg(238),    // 暗灰 框线（比 245 沉，不抢文字）
+    live: fg(119),    // 嫩绿 ●实时专用
+    time: fg(248),    // 浅灰 时间戳
+    warn: fg(214),    // 金黄 告警
+    stash: fg(215),   // 橙 ⊘藏
+    invTab: (s) => (COLOR ? `\x1b[48;5;24m\x1b[38;5;195m${s}\x1b[0m` : `[${s}]`), // 选中 tab：靛蓝底+亮字
 };
 
 /**
@@ -154,16 +166,26 @@ function isWide(cp) {
     );
 }
 
-/** 按显示宽度截断（超出加省略号 …，… 本身记 1 宽） */
+/**
+ * 按显示宽度截断（超出加省略号 …，… 本身记 1 宽）。
+ * ANSI 感知：保留并透传转义序列（不计宽），只数可见字符；截断时补 \x1b[0m 复位，
+ * 防止已着色的合成行被切断后颜色"漏"到右框线（boxLine 会对整条多色行调本函数）。
+ */
 function clip(str, max) {
     if (dispWidth(str) <= max) return str;
     let w = 0, res = '';
-    for (const ch of str.replace(/\x1b\[[0-9;]*m/g, '')) {
+    const re = /\x1b\[[0-9;]*m/g;          // 转义序列
+    let i = 0;
+    while (i < str.length) {
+        re.lastIndex = i;
+        const m = re.exec(str);
+        if (m && m.index === i) { res += m[0]; i = re.lastIndex; continue; } // 透传转义，不计宽
+        const ch = String.fromCodePoint(str.codePointAt(i));
         const cw = isWide(ch.codePointAt(0)) ? 2 : 1;
         if (w + cw > max - 1) { res += '…'; break; }
-        w += cw; res += ch;
+        w += cw; res += ch; i += ch.length;
     }
-    return res;
+    return COLOR ? res + '\x1b[0m' : res;   // 截断后复位，杜绝颜色越界
 }
 
 /** 按显示宽度右补空格到 width（已超则截断） */
@@ -186,20 +208,29 @@ let cur = 0;       // 当前屏索引
 let scroll = 0;    // 当前屏纵向滚动偏移（行）。key 里乐观增减，统一在 frame() 里夹紧——见下
 let teamRoot = null;
 
-/** 顶部状态栏 + tab 行（tab 行嵌进上框边） */
-function header(tabs, innerW) {
-    const live = COLOR ? c.green('●实时') : '●实时';
-    const title = `${c.cyan('⬢')} ${c.bold('tvs-boss')} ${c.gray('·')} ${state.root} ${c.gray('·')} ${state.now}  ${live}`;
-    // tab 段：[1]总览[2]项目… 选中反白
+/** 路径只留末两段（避免长路径挤掉时间）：E:\a\b\tvs\AIConfig → …/tvs/AIConfig */
+function shortRoot(root) {
+    const parts = String(root).split(/[\\/]+/).filter(Boolean);
+    if (parts.length <= 2) return root;
+    return '…/' + parts.slice(-2).join('/');
+}
+
+/**
+ * 顶部三行：标题行 / tab 行 / 圆角上框线。tab 不再嵌进框线（独立成行）。
+ * 返回 [标题行, tab行, 上框线]——后两者下面接 body 的 │…│ 与 ╰──╯ 底框。
+ */
+function header(tabs, innerW, above) {
+    const live = `${c.live('●')} ${c.dim('实时')}`;
+    const title = ` ${c.title('◆')} ${c.bold('tvs-boss')} ${c.dim('·')} ${c.time(shortRoot(state.root))} ${c.dim('·')} ${c.time(state.now)}  ${live}`;
+    // tab 段：[1]总览[2]项目… 选中靛蓝底
     const seg = tabs.map((t, i) => {
         const lbl = `[${i + 1}]${t[0]}`;
-        return i === cur ? c.invCyan(lbl) : c.dim(lbl);
-    }).join('');
-    const segW = dispWidth(seg);
-    const fill = '─'.repeat(Math.max(0, innerW - segW));
+        return i === cur ? c.invTab(lbl) : c.dim(lbl);
+    }).join(' ');
     return [
-        ' ' + title,
-        '┌' + seg + c.gray(fill) + '┐',
+        title,
+        ' ' + seg,
+        edgeLine('╭', '╮', innerW, above), // 上框线；上方有内容被滚掉时带 ↑N 指示
     ];
 }
 
@@ -214,8 +245,8 @@ function edgeLine(left, right, innerW, label) {
     const fill = Math.max(0, innerW - lw - 2);
     return left + c.gray('─'.repeat(fill)) + ' ' + c.dim(label) + ' ' + right;
 }
-function sepLine(innerW, label) { return edgeLine('├', '┤', innerW, label); }
-function botLine(innerW, label) { return edgeLine('└', '┘', innerW, label); }
+/** 圆角底框线，可带 ↓N 滚动指示 */
+function botLine(innerW, label) { return edgeLine('╰', '╯', innerW, label); }
 
 /* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
 
@@ -227,6 +258,16 @@ function viewOverview(innerW) {
     // 三个数（都是 git 能算准的）：项目 / 在途分支 / 未提交
     const stat = `${c.bold('项目' + ps.length)}    ${c.bold('在途分支' + feat)}    ${c.bold('未提交' + dirty)}`;
     lines.push(' ' + stat);
+    // 告警行：仅当有 dirty / behind 时显示一行金黄；无异常不显示
+    const flags = ps
+        .filter((p) => !p.error && (p.dirty > 0 || p.behind > 0))
+        .map((p) => {
+            const bits = [];
+            if (p.behind > 0) bits.push('↓' + p.behind);
+            if (p.dirty > 0) bits.push('◉' + p.dirty + '改');
+            return `${p.id}(${bits.join(' ')})`;
+        });
+    if (flags.length) lines.push(' ' + c.warn('⚠ 需关注 ' + clip(flags.join(' · '), innerW - 8)));
     lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
     if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
     for (const p of ps) lines.push(...projectRowsCompact(p, innerW));
@@ -235,15 +276,16 @@ function viewOverview(innerW) {
 
 /** 总览用的精简项目行（每项目 2~3 行） */
 function projectRowsCompact(p, innerW) {
-    if (p.error) return [` ${c.bold(padTo(p.id, 12))} ${c.red('✗ ' + p.error)}`];
-    const dirtyTag = p.dirty > 0 ? c.yellow(`●${p.dirty}改`) : c.green('○干净');
-    const ab = `${p.ahead ? c.green('↑' + p.ahead) : c.dim('↑0')}${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
-    const head = ` ${c.bold(padTo(p.id, 12))} ${c.cyan('⎇' + padTo(p.branch, 12))} ${dirtyTag}  ${ab}`;
+    if (p.error) return [` ${c.bold(padTo(p.id, 12))} ${c.red('✕ ' + p.error)}`];
+    const dirtyTag = p.dirty > 0 ? c.yellow(`◉${p.dirty}改`) : c.green('◌干净');
+    const ab = `${p.ahead ? c.ahead('↑' + p.ahead) : c.dim('↑0')}${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
+    const stashTag = p.stash > 0 ? '  ' + c.stash('⊘' + p.stash + '藏') : '';
+    const head = ` ${c.bold(padTo(p.id, 12))} ${c.cyan('⎇' + padTo(p.branch, 12))} ${dirtyTag}  ${ab}${stashTag}`;
     const rows = [head];
     if (p.branches && p.branches.length) {
-        const shown = p.branches.slice(0, 2).join('·');
+        const shown = p.branches.slice(0, 2).map((b) => b.name).join('·');
         const more = p.branches.length > 2 ? `…(+${p.branches.length - 2})` : '';
-        rows.push(c.dim('  在途 ') + c.blue(clip(shown + more, innerW - 7)));
+        rows.push(c.dim('  ▸ ') + c.blue(clip(shown + more, innerW - 7)));
     }
     if (p.last && p.last.msg) {
         rows.push(c.dim('  最近 ') + clip(`${p.last.msg}·${p.last.when || ''}·${p.last.who || ''}`, innerW - 7));
@@ -251,20 +293,32 @@ function projectRowsCompact(p, innerW) {
     return rows;
 }
 
-/** 项目屏：每项目完整信息（分支·主分支·dirty·ahead/behind·在途分支·最近提交） */
+/** 项目屏：每项目完整信息（分支·主分支·dirty·ahead/behind·stash·在途分支+各自活跃时间·最近提交） */
 function viewProjects(innerW) {
     const ps = state.projects || [];
     if (!ps.length) return [c.dim(' 还没登记项目')];
     const lines = [];
     ps.forEach((p, i) => {
-        if (i > 0) lines.push('');
-        if (p.error) { lines.push(` ${c.bold(p.id)}  ${c.red('✗ ' + p.error)}`); return; }
-        const dirtyTag = p.dirty > 0 ? c.yellow(`●${p.dirty}改`) : c.green('○干净');
-        const ab = `${p.ahead ? c.green('↑' + p.ahead) : c.dim('↑0')} ${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
-        lines.push(` ${c.bold(p.id)}  ${c.cyan('⎇' + p.branch)} ${c.gray('（主 ' + p.main + '）')}  ${dirtyTag}  ${ab}`);
+        // 项目间编号分隔线：─── 1/4  ShireHub ───────（暗灰线、id 蓝紫 bold）
+        const tag = `─── ${i + 1}/${ps.length}  ${p.id} `;
+        const tail = '─'.repeat(Math.max(0, innerW - dispWidth(tag) - 1));
+        lines.push(c.gray(' ─── ' + `${i + 1}/${ps.length}  `) + c.title(c.bold(p.id)) + ' ' + c.gray(tail));
+        if (p.error) { lines.push(` ${c.red('✕ ' + p.error)}`); return; }
+        const dirtyTag = p.dirty > 0 ? c.yellow(`◉${p.dirty}改`) : c.green('◌干净');
+        const ab = `${p.ahead ? c.ahead('↑' + p.ahead) : c.dim('↑0')} ${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
+        const stashTag = p.stash > 0 ? '  ' + c.stash('⊘' + p.stash + '藏') : '';
+        lines.push(`   ${c.cyan('⎇' + p.branch)} ${c.dim('（主 ' + p.main + '）')}  ${dirtyTag}  ${ab}${stashTag}`);
         lines.push(c.dim('   ' + p.path));
-        const br = p.branches && p.branches.length ? p.branches.map((b) => c.blue(b)).join(c.dim('·')) : c.dim('— 无');
-        lines.push(c.dim('   在途分支 ') + br);
+        // 在途分支：各自带最近活跃时间，列对齐
+        if (p.branches && p.branches.length) {
+            lines.push(c.dim('   在途分支'));
+            const nameW = Math.min(36, Math.max(...p.branches.map((b) => dispWidth(b.name))));
+            for (const b of p.branches) {
+                lines.push('     ' + c.blue('▸' + padTo(b.name, nameW)) + '  ' + c.time(b.age || ''));
+            }
+        } else {
+            lines.push(c.dim('   在途分支 ') + c.dim('— 无'));
+        }
         if (p.last && p.last.msg) {
             lines.push(c.dim('   最近 ') + c.bold(clip(p.last.msg, innerW - 8)));
             lines.push(c.dim('         ' + (p.last.when || '') + ' · ' + (p.last.who || '')));
@@ -280,6 +334,8 @@ function viewProjects(innerW) {
  */
 function mdInline(s) {
     return s
+        .replace(/^\[ \]\s*/, c.dim('◌ '))                       // - [ ] 未完成 → ◌
+        .replace(/^\[[xX]\]\s*/, c.green('✓ '))                  // - [x] 完成 → ✓
         .replace(/\*\*(.+?)\*\*/g, (_, t) => c.bold(t))
         .replace(/__(.+?)__/g, (_, t) => c.bold(t))
         .replace(/(?<![A-Za-z0-9])[_*](?=\S)(.+?)(?<=\S)[_*](?![A-Za-z0-9])/g, '$1') // _斜体_ / *斜体*
@@ -320,12 +376,11 @@ function frame() {
     else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
     else body = viewMarkdown(state.tasksMd, innerW, true); // 任务屏富渲染（**/_/--- 处理）
 
-    const head = header(tabs, innerW);
     const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · ↑↓/jk滚动 · PgUp/PgDn翻页 · g/G首尾 · q退出');
 
-    // 高度预算：终端行数 - 顶栏(1) - 上框(1) - 分隔(1) - 下框(1) - 底提示(1) - 安全(1)
+    // 高度预算：终端行数 - 标题(1) - tab(1) - 上框(1) - 下框(1) - 底提示(1) = -5
     const rows = out.rows || 24;
-    const maxBody = Math.max(3, rows - 6);
+    const maxBody = Math.max(3, rows - 5);
 
     // —— 滚动夹紧只此一处 —— body.length 只有这里才知道（依赖数据/换行/终端宽）。
     // key 里乐观增减 scroll，到这里统一夹到 [0, maxScroll]，一处兜住：按键过冲 / resize 变矮 / 数据缩短。
@@ -334,13 +389,12 @@ function frame() {
     if (scroll < 0) scroll = 0;
     const shown = body.slice(scroll, scroll + maxBody);
 
-    // 滚动指示放进边线（不占正文行，避免滚动时底框跳动）
+    // 滚动指示放进边线（不占正文行，避免滚动时框跳动）：↑N 进上框、↓N 进下框
     const above = scroll > 0 ? `↑${scroll} 行` : '';
-    const below = scroll < maxScroll ? `↓${maxScroll - scroll} 行` : '';
+    const below = scroll < maxScroll ? `↓还有${maxScroll - scroll} 行` : '';
 
     const lines = [
-        ...head,
-        sepLine(innerW, above),
+        ...header(tabs, innerW, above),
         ...shown.map((ln) => boxLine(ln, innerW)),
         botLine(innerW, below),
         foot,
