@@ -11,7 +11,7 @@
  * 形态「终端里跑的 TUI」：
  *   - 进备用屏（alt-screen），原地清屏重画当前屏，退出时原样还原终端，不留滚动残影。
  *   - 键盘 1~5 切屏（第 5 屏「任务」按数据有无自动出现）；↑↓/jk 滚动；q / Ctrl+C 退出。
- *   - 实时两路：fs.watch(.tvs-boss) 文件变即时重扫（150ms 抖动合并）+ 每 2s 兜底重扫 git。
+ *   - 实时两路：fs.watch(.tvs-boss) 文件变即时重扫（150ms 抖动合并）+ 每 REFRESH_MS 兜底重扫 git。
  *
  * 数据引擎（findTeamRoot / readMem / readTasks / parseProjects / git / gitSnapshot / buildState）。
  *
@@ -62,7 +62,7 @@ function parseProjects(md) {
 }
 
 // 异步跑 git（promisify(exec) 走 shell，保留 --format="…" 的引号语义，与原同步版行为一致；
-// 关键：异步=不阻塞事件循环，2s 重扫期间按键/滚动照样跟手）。出错返回 null，契约同原版。
+// 关键：异步=不阻塞事件循环，周期重扫期间按键/滚动照样跟手）。出错返回 null，契约同原版。
 async function git(path, args) {
     try { const { stdout } = await execAsync(`git -C "${path}" ${args}`, { encoding: 'utf8' }); return stdout.trim(); }
     catch { return null; }
@@ -232,6 +232,9 @@ function padTo(str, width) {
     const gap = width - dispWidth(clipped);
     return clipped + ' '.repeat(Math.max(0, gap));
 }
+
+// 兜底重扫间隔（ms）：每隔这么久后台静默重扫一次 git；数据没变不重绘。boss 偏好 4s。
+const REFRESH_MS = 4000;
 
 /* ────────────────────────── 行动雷达阈值（一处可调，boss 按需改）────────────────────────── */
 // 这些是"需关注"的触发线；都是 git 派生量，改一个常量即调灵敏度。
@@ -664,8 +667,8 @@ function main() {
         });
     } catch { /* 平台不支持 watch 时降级，靠下面的定时重扫 */ }
 
-    // 实时二：每 2s 兜底重扫 git（异步，不阻塞输入；scanning 互斥防叠加；数据没变不重绘）
-    gitTimer = setInterval(() => rebuild(), 2000);
+    // 实时二：每 REFRESH_MS 兜底重扫 git（异步，不阻塞输入；scanning 互斥防叠加；数据没变不重绘）
+    gitTimer = setInterval(() => rebuild(), REFRESH_MS);
 
     // 窗口尺寸变化 → 先整屏清一次（变窄时旧宽行会留残），再重绘
     out.on('resize', () => { out.write('\x1b[2J'); lastRowCount = 0; render(); });
