@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 /**
- * tvs-boss 团队面板 —— 零依赖本地网页 dashboard（v3：SSE 实时推送 + 在岗名单）。
+ * tvs-boss 团队面板 —— 零依赖终端 ANSI 字符画 TUI（v4：原地重绘 + 键控切屏）。
  *
- * 只用 node 内置（http / fs / child_process），不引任何三方库。
- * 实时来源两路，都走一个 SSE 流推给浏览器（客户端不再自己轮询）：
- *   - 文件变（.tvs-boss 下记忆/在岗名单）→ fs.watch 即时推
- *   - git 活跃态（分支/改动/领先落后/提交）→ 服务端每 2s 重扫一次再推
- * 慢变量：projects.md / rules.md / contracts.md（直接读）。
- * 在岗名单：live-agents.json —— 这是【运行态 scratchpad，不是记忆】，由 leader 每次 spawn/回收时覆盖写，
- *   reflect 当前在岗（spawn 列表 git 推不出来，所以这一项破例落一个会被不断覆盖的临时文件）。
+ * 只用 node 内置（fs / child_process / readline / process.stdout + ANSI 转义），不引任何三方库。
+ * 形态从 v3 的「本地网页 + SSE」改成「终端里跑的 TUI」：
+ *   - 进备用屏（alt-screen），原地清屏重画当前屏，退出时原样还原终端，不留滚动残影。
+ *   - 键盘 1~5 切屏（第 6 屏「任务」按数据有无自动出现），q / Ctrl+C 退出。
+ *   - 实时两路（沿用 v3 思路）：fs.watch(.tvs-boss) 文件变即时重扫（150ms 抖动合并）+ 每 2s 兜底重扫 git。
  *
- * 用法：node panel.mjs [--port 4500]
+ * 数据引擎（findTeamRoot / readMem / readLiveAgents / parseProjects / git / gitSnapshot / buildState）
+ *   逻辑与 v3 完全一致，只换渲染层和交互层。
+ *
+ * 用法：node panel.mjs
  */
-import { createServer } from 'node:http';
 import { readFileSync, existsSync, watch } from 'node:fs';
 import { join, parse as parsePath } from 'node:path';
 import { execSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import readline from 'node:readline';
+
+/* ────────────────────────── 数据引擎（照搬 v3，逻辑不变） ────────────────────────── */
 
 function findTeamRoot(start = process.cwd()) {
     let dir = start;
@@ -76,6 +80,13 @@ function gitSnapshot(p) {
     return { ...p, branch, dirty, ahead, behind, branches, last: { msg, when, who } };
 }
 
+/** 读 tvs-task 的任务表（~/.tasklog/active.md），第 6 屏用。无文件则返回 null（屏不出现）。 */
+function readTasks() {
+    const p = join(homedir(), '.tasklog', 'active.md');
+    if (!existsSync(p)) return null;
+    try { return readFileSync(p, 'utf8'); } catch { return null; }
+}
+
 function buildState(root) {
     const projectsMd = readMem(root, 'projects.md');
     const live = readLiveAgents(root);
@@ -87,145 +98,351 @@ function buildState(root) {
         agentsUpdatedAt: live.updatedAt,
         rulesMd: readMem(root, 'rules.md'),
         contractsMd: readMem(root, 'contracts.md'),
+        tasksMd: readTasks(),
     };
 }
 
-const PAGE = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>tvs-boss 团队面板</title><style>
-:root{--bg:#1a1b26;--panel:#1f2335;--card:#24283b;--line:#2f344d;
-  --fg:#c0caf5;--mut:#565f89;--dim:#787c99;
-  --ac:#7aa2f7;--ok:#9ece6a;--warn:#e0af68;--bad:#f7768e;--info:#7dcfff;--pur:#bb9af7}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.65 ui-monospace,"SF Mono",Consolas,monospace}
-header{padding:16px 24px;display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--line)}
-h1{font-size:15px;margin:0;color:var(--ac);font-weight:600;letter-spacing:.3px}
-.root{color:var(--mut);font-size:12px}
-.live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);transition:.3s}
-.dot.off{background:var(--bad);box-shadow:none}
-.flash{animation:fl .6s}@keyframes fl{0%{background:var(--info)}100%{background:var(--ok)}}
-nav{display:flex;gap:6px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-nav button{background:transparent;border:1px solid var(--line);color:var(--dim);padding:7px 16px;border-radius:8px;cursor:pointer;font:inherit;transition:.15s}
-nav button:hover{color:var(--fg);border-color:var(--mut)}
-nav button.on{color:var(--bg);background:var(--ac);border-color:var(--ac);font-weight:600}
-nav button .k{opacity:.55;margin-right:7px;font-size:11px}
-main{padding:24px;max-width:1080px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
-.card h3{margin:0 0 4px;font-size:14px;color:var(--fg)}
-.path{color:var(--mut);font-size:11px;margin-bottom:12px;word-break:break-all}
-.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:7px 0}
-.tag{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;font-size:11.5px;background:var(--panel);border:1px solid var(--line)}
-.tag.branch{color:var(--info)}.tag.clean{color:var(--ok)}.tag.dirty{color:var(--warn)}
-.tag.ahead{color:var(--ok)}.tag.behind{color:var(--bad)}.tag.warm{color:var(--ok)}.tag.role{color:var(--pur)}
-.feat{margin:10px 0 4px;padding-top:10px;border-top:1px dashed var(--line)}
-.feat .lbl{color:var(--mut);font-size:11px;margin-bottom:5px}
-.feat span{display:inline-block;color:var(--info);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin:0 5px 5px 0;font-size:11.5px}
-.last{color:var(--dim);font-size:11.5px;margin-top:10px}.last b{color:var(--fg);font-weight:500}
-.err{color:var(--bad)}
-.ov{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 20px;min-width:110px}
-.stat .n{font-size:24px;color:var(--ac);font-weight:600}.stat .l{color:var(--mut);font-size:12px}
-.doc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px}
-.doc h2{font-size:15px;color:var(--ac);margin:18px 0 8px;border-bottom:1px solid var(--line);padding-bottom:6px}
-.doc h2:first-child{margin-top:0}.doc li{margin:4px 0}.doc p{color:var(--dim)}
-.empty{color:var(--mut);padding:30px;text-align:center}
-</style></head><body>
-<header><h1>⬢ tvs-boss</h1><span class="root" id="root"></span>
-  <span class="live"><span class="dot" id="dot"></span><span id="livetxt">连接中…</span></span></header>
-<nav id="nav"></nav><main id="view"></main>
-<script>
-const TABS=[['总览','overview'],['项目','projects'],['团队','team'],['守则','rules'],['契约','contracts']];
-let S={},cur=0;
-function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-function md(t){const out=[];let ul=false;
-  for(const raw of (t||'').split('\\n')){const l=raw.trimEnd();
-    if(/^##\\s+/.test(l)){if(ul){out.push('</ul>');ul=false}out.push('<h2>'+esc(l.replace(/^##\\s+/,''))+'</h2>')}
-    else if(/^[-*]\\s+/.test(l)){if(!ul){out.push('<ul>');ul=true}out.push('<li>'+esc(l.replace(/^[-*]\\s+/,''))+'</li>')}
-    else if(l===''){if(ul){out.push('</ul>');ul=false}}
-    else{if(ul){out.push('</ul>');ul=false}if(!/^#\\s/.test(l))out.push('<p>'+esc(l)+'</p>')}}
-  if(ul)out.push('</ul>');return out.join('')}
-function projectCard(p){
-  if(p.error)return '<div class="card"><h3>'+esc(p.id)+'</h3><div class="path">'+esc(p.path)+'</div><div class="err">'+esc(p.error)+'</div></div>';
-  const d=p.dirty>0?'<span class="tag dirty">●'+p.dirty+' 改动</span>':'<span class="tag clean">○ 干净</span>';
-  const ab=(p.ahead?'<span class="tag ahead">↑'+p.ahead+'</span>':'')+(p.behind?'<span class="tag behind">↓'+p.behind+'</span>':'');
-  const feat=p.branches.length?'<div class="feat"><div class="lbl">在途分支（'+p.branches.length+'）</div>'+p.branches.map(b=>'<span>'+esc(b)+'</span>').join('')+'</div>':'<div class="feat"><div class="lbl">在途分支</div><span style="color:var(--mut);border:0;background:none;padding-left:0">— 无</span></div>';
-  const last=p.last&&p.last.msg?'<div class="last">最近 <b>'+esc(p.last.msg)+'</b><br>'+esc(p.last.when||'')+' · '+esc(p.last.who||'')+'</div>':'';
-  return '<div class="card"><h3>'+esc(p.id)+'</h3><div class="path">'+esc(p.path)+'</div><div class="row"><span class="tag branch">⎇ '+esc(p.branch)+'（主 '+esc(p.main)+'）</span></div><div class="row">'+d+ab+'</div>'+feat+last+'</div>';
+/* ────────────────────────── 渲染基建：宽度 / 颜色 / 框线 ────────────────────────── */
+
+const out = process.stdout;
+const COLOR = out.isTTY && !process.env.NO_COLOR; // 不支持色彩或显式关色时降级为无色
+const COLS = () => out.columns || 80;             // 终端列数，随窗口变
+
+// ANSI 颜色：关色时全部返回原文，保证无色终端可读
+const c = {
+    reset: COLOR ? '\x1b[0m' : '',
+    dim: (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s),
+    bold: (s) => (COLOR ? `\x1b[1m${s}\x1b[0m` : s),
+    cyan: (s) => (COLOR ? `\x1b[36m${s}\x1b[0m` : s),
+    green: (s) => (COLOR ? `\x1b[32m${s}\x1b[0m` : s),
+    yellow: (s) => (COLOR ? `\x1b[33m${s}\x1b[0m` : s),
+    red: (s) => (COLOR ? `\x1b[31m${s}\x1b[0m` : s),
+    blue: (s) => (COLOR ? `\x1b[34m${s}\x1b[0m` : s),
+    mag: (s) => (COLOR ? `\x1b[35m${s}\x1b[0m` : s),
+    gray: (s) => (COLOR ? `\x1b[90m${s}\x1b[0m` : s),
+    invCyan: (s) => (COLOR ? `\x1b[46m\x1b[30m${s}\x1b[0m` : `[${s}]`), // 选中 tab 反白
+};
+
+/**
+ * 显示宽度：CJK / 全角字符记 2 宽，其余记 1。
+ * 关键取舍（见 advisor 复核）：box-drawing(─│┌…) 与 几何/箭头符号(⬢●○↑↓⎇) 属
+ * East-Asian-Ambiguous，这里一律按 1 宽算 —— 与主流等宽终端（Windows Terminal）一致。
+ * 同时剥掉 ANSI 转义序列再量宽，避免颜色码被算进可见宽度。
+ */
+function dispWidth(str) {
+    const s = str.replace(/\x1b\[[0-9;]*m/g, '');
+    let w = 0;
+    for (const ch of s) {
+        const cp = ch.codePointAt(0);
+        if (isWide(cp)) w += 2; else w += 1;
+    }
+    return w;
 }
-function agentCard(a){
-  return '<div class="card"><h3>'+esc(a.name||'?')+'</h3><div class="row">'
-    +'<span class="tag role">'+esc(a.role||'?')+'</span>'
-    +(a.project?'<span class="tag branch">'+esc(a.project)+'</span>':'')
-    +'<span class="tag warm">'+esc(a.state||'在岗')+'</span></div>'
-    +(a.since?'<div class="last">起于 '+esc(a.since)+'</div>':'')+'</div>';
+
+/** 是否全角/宽字符（CJK 统一表意、假名、全角符号、CJK 标点等） */
+function isWide(cp) {
+    return (
+        (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+        (cp >= 0x2e80 && cp <= 0x303e) || // CJK 部首 / 标点
+        (cp >= 0x3041 && cp <= 0x33ff) || // 假名 / CJK 符号
+        (cp >= 0x3400 && cp <= 0x4dbf) || // CJK 扩展 A
+        (cp >= 0x4e00 && cp <= 0x9fff) || // CJK 统一表意
+        (cp >= 0xa000 && cp <= 0xa4cf) || // 彝文
+        (cp >= 0xac00 && cp <= 0xd7a3) || // 谚文音节
+        (cp >= 0xf900 && cp <= 0xfaff) || // CJK 兼容表意
+        (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK 兼容形式
+        (cp >= 0xff00 && cp <= 0xff60) || // 全角 ASCII
+        (cp >= 0xffe0 && cp <= 0xffe6) || // 全角符号
+        (cp >= 0x20000 && cp <= 0x3fffd)  // CJK 扩展 B+
+    );
 }
-function render(){
-  document.getElementById('root').textContent=S.root?(S.root+'  ·  '+S.now):'';
-  const nav=document.getElementById('nav');nav.innerHTML='';
-  TABS.forEach((t,i)=>{const b=document.createElement('button');b.className=i===cur?'on':'';b.innerHTML='<span class="k">'+(i+1)+'</span>'+t[0];b.onclick=()=>{cur=i;render()};nav.appendChild(b)});
-  const v=document.getElementById('view'),key=TABS[cur][1],ps=S.projects||[],ag=S.agents||[];
-  if(key==='overview'){
-    const dirty=ps.filter(p=>p.dirty>0).length,feat=ps.reduce((n,p)=>n+((p.branches||[]).length),0);
-    v.innerHTML='<div class="ov">'
-      +'<div class="stat"><div class="n">'+ps.length+'</div><div class="l">项目</div></div>'
-      +'<div class="stat"><div class="n">'+ag.length+'</div><div class="l">在岗成员</div></div>'
-      +'<div class="stat"><div class="n">'+feat+'</div><div class="l">在途分支</div></div>'
-      +'<div class="stat"><div class="n">'+dirty+'</div><div class="l">有未提交</div></div></div>'
-      +'<div class="grid">'+(ps.map(projectCard).join('')||'<div class="empty">还没登记项目，先 /tvs-boss 建团</div>')+'</div>';
-  }else if(key==='projects'){v.innerHTML='<div class="grid">'+(ps.map(projectCard).join('')||'<div class="empty">还没登记项目</div>')+'</div>';}
-  else if(key==='team'){
-    v.innerHTML=ag.length?('<div class="grid">'+ag.map(agentCard).join('')+'</div>')
-      :'<div class="empty">当前无在岗成员（懒启动：来活才 spawn）<br><span style="font-size:12px">leader 没在写 live-agents.json 时这里恒空</span></div>';
-  }
-  else if(key==='rules'){v.innerHTML='<div class="doc">'+md(S.rulesMd)+'</div>';}
-  else{v.innerHTML='<div class="doc">'+md(S.contractsMd)+'</div>';}
+
+/** 按显示宽度截断（超出加省略号 …，… 本身记 1 宽） */
+function clip(str, max) {
+    if (dispWidth(str) <= max) return str;
+    let w = 0, res = '';
+    for (const ch of str.replace(/\x1b\[[0-9;]*m/g, '')) {
+        const cw = isWide(ch.codePointAt(0)) ? 2 : 1;
+        if (w + cw > max - 1) { res += '…'; break; }
+        w += cw; res += ch;
+    }
+    return res;
 }
-// SSE：服务端推，客户端不轮询
-function connect(){
-  const es=new EventSource('/events');
-  const dot=document.getElementById('dot'),txt=document.getElementById('livetxt');
-  es.onopen=()=>{dot.className='dot';txt.textContent='实时'};
-  es.onmessage=e=>{S=JSON.parse(e.data);render();dot.classList.remove('flash');void dot.offsetWidth;dot.classList.add('flash')};
-  es.onerror=()=>{dot.className='dot off';txt.textContent='断了·重连中';};
+
+/** 按显示宽度右补空格到 width（已超则截断） */
+function padTo(str, width) {
+    const clipped = clip(str, width);
+    const gap = width - dispWidth(clipped);
+    return clipped + ' '.repeat(Math.max(0, gap));
 }
-document.addEventListener('keydown',e=>{const n=parseInt(e.key);if(n>=1&&n<=TABS.length){cur=n-1;render()}});
-connect();
-</script></body></html>`;
+
+/* ────────────────────────── 屏定义 + 帧组装 ────────────────────────── */
+
+// 第 6 屏「任务」仅在有 ~/.tasklog/active.md 时出现
+const BASE_TABS = [['总览', 'overview'], ['项目', 'projects'], ['团队', 'team'], ['守则', 'rules'], ['契约', 'contracts']];
+function tabsFor(state) {
+    return state?.tasksMd != null ? [...BASE_TABS, ['任务', 'tasks']] : BASE_TABS;
+}
+
+let state = null;  // 唯一缓存态；只有 rebuild() 写它，render() 只读它（切屏不碰 git）
+let cur = 0;       // 当前屏索引
+let teamRoot = null;
+
+/** 顶部状态栏 + tab 行（tab 行嵌进上框边） */
+function header(tabs, innerW) {
+    const live = COLOR ? c.green('●实时') : '●实时';
+    const title = `${c.cyan('⬢')} ${c.bold('tvs-boss')} ${c.gray('·')} ${state.root} ${c.gray('·')} ${state.now}  ${live}`;
+    // tab 段：[1]总览[2]项目… 选中反白
+    const seg = tabs.map((t, i) => {
+        const lbl = `[${i + 1}]${t[0]}`;
+        return i === cur ? c.invCyan(lbl) : c.dim(lbl);
+    }).join('');
+    const segW = dispWidth(seg);
+    const fill = '─'.repeat(Math.max(0, innerW - segW));
+    return [
+        ' ' + title,
+        '┌' + seg + c.gray(fill) + '┐',
+    ];
+}
+
+/** 一行内容塞进左右框边：│ <内容补到 innerW> │ */
+function boxLine(content, innerW) {
+    return '│' + padTo(content, innerW) + '│';
+}
+function sepLine(innerW) { return '├' + c.gray('─'.repeat(innerW)) + '┤'; }
+function botLine(innerW) { return '└' + c.gray('─'.repeat(innerW)) + '┘'; }
+
+/* —— 各屏正文：返回「内容行数组」（不含框边，由 frame() 包边） —— */
+
+function viewOverview(innerW) {
+    const ps = state.projects || [];
+    const dirty = ps.filter((p) => p.dirty > 0).length;
+    const feat = ps.reduce((n, p) => n + ((p.branches || []).length), 0);
+    const lines = [];
+    // 四个数：项目 / 在岗 / 在途分支 / 未提交
+    const stat = `${c.bold('项目' + ps.length)}    ${c.bold('在岗' + (state.agents || []).length)}    ${c.bold('在途分支' + feat)}    ${c.bold('未提交' + dirty)}`;
+    lines.push(' ' + stat);
+    lines.push(c.gray(' ' + '─'.repeat(Math.max(0, innerW - 2))));
+    if (!ps.length) { lines.push(c.dim(' 还没登记项目，先 /tvs-boss 建团')); return lines; }
+    for (const p of ps) lines.push(...projectRowsCompact(p, innerW));
+    return lines;
+}
+
+/** 总览用的精简项目行（每项目 2~3 行） */
+function projectRowsCompact(p, innerW) {
+    if (p.error) return [` ${c.bold(padTo(p.id, 12))} ${c.red('✗ ' + p.error)}`];
+    const dirtyTag = p.dirty > 0 ? c.yellow(`●${p.dirty}改`) : c.green('○干净');
+    const ab = `${p.ahead ? c.green('↑' + p.ahead) : c.dim('↑0')}${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
+    const head = ` ${c.bold(padTo(p.id, 12))} ${c.cyan('⎇' + padTo(p.branch, 12))} ${dirtyTag}  ${ab}`;
+    const rows = [head];
+    if (p.branches && p.branches.length) {
+        const shown = p.branches.slice(0, 2).join('·');
+        const more = p.branches.length > 2 ? `…(+${p.branches.length - 2})` : '';
+        rows.push(c.dim('  在途 ') + c.blue(clip(shown + more, innerW - 7)));
+    }
+    if (p.last && p.last.msg) {
+        rows.push(c.dim('  最近 ') + clip(`${p.last.msg}·${p.last.when || ''}·${p.last.who || ''}`, innerW - 7));
+    }
+    return rows;
+}
+
+/** 项目屏：每项目完整信息（分支·主分支·dirty·ahead/behind·在途分支·最近提交） */
+function viewProjects(innerW) {
+    const ps = state.projects || [];
+    if (!ps.length) return [c.dim(' 还没登记项目')];
+    const lines = [];
+    ps.forEach((p, i) => {
+        if (i > 0) lines.push('');
+        if (p.error) { lines.push(` ${c.bold(p.id)}  ${c.red('✗ ' + p.error)}`); return; }
+        const dirtyTag = p.dirty > 0 ? c.yellow(`●${p.dirty}改`) : c.green('○干净');
+        const ab = `${p.ahead ? c.green('↑' + p.ahead) : c.dim('↑0')} ${p.behind ? c.red('↓' + p.behind) : c.dim('↓0')}`;
+        lines.push(` ${c.bold(p.id)}  ${c.cyan('⎇' + p.branch)} ${c.gray('（主 ' + p.main + '）')}  ${dirtyTag}  ${ab}`);
+        lines.push(c.dim('   ' + p.path));
+        const br = p.branches && p.branches.length ? p.branches.map((b) => c.blue(b)).join(c.dim('·')) : c.dim('— 无');
+        lines.push(c.dim('   在途分支 ') + br);
+        if (p.last && p.last.msg) {
+            lines.push(c.dim('   最近 ') + c.bold(clip(p.last.msg, innerW - 8)));
+            lines.push(c.dim('         ' + (p.last.when || '') + ' · ' + (p.last.who || '')));
+        }
+    });
+    return lines;
+}
+
+/** 团队屏：在岗名单 name/role/project/state/since */
+function viewTeam(innerW) {
+    const ag = state.agents || [];
+    if (!ag.length) {
+        return [
+            c.dim(' 当前无在岗成员（懒启动：来活才 spawn）'),
+            c.dim(' leader 没在写 live-agents.json 时这里恒空'),
+        ];
+    }
+    const lines = [];
+    if (state.agentsUpdatedAt) lines.push(c.dim(' 名单更新于 ' + state.agentsUpdatedAt));
+    for (const a of ag) {
+        const role = c.mag(a.role || '?');
+        const proj = a.project ? c.cyan(a.project) : c.dim('—');
+        const st = c.green(a.state || '在岗');
+        lines.push(` ${c.bold(padTo(a.name || '?', 14))} ${padTo(role, 18)} ${padTo(proj, 16)} ${st}`);
+        if (a.since) lines.push(c.dim('   起于 ' + a.since));
+    }
+    return lines;
+}
+
+/** 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段 */
+function viewMarkdown(md, innerW) {
+    const lines = [];
+    for (const raw of (md || '').split('\n')) {
+        const l = raw.trimEnd();
+        if (/^##\s+/.test(l)) { lines.push(''); lines.push(' ' + c.cyan(c.bold(l.replace(/^##\s+/, '')))); }
+        else if (/^#\s+/.test(l)) { lines.push(' ' + c.bold(l.replace(/^#\s+/, ''))); }
+        else if (/^[-*]\s+/.test(l)) lines.push(c.dim('  • ') + l.replace(/^[-*]\s+/, ''));
+        else if (l === '') lines.push('');
+        else lines.push(c.dim(' ' + l));
+    }
+    return lines.length ? lines : [c.dim(' （空）')];
+}
+
+/** 组装当前屏整帧字符串（含框边、按终端高度裁剪、底部提示） */
+function frame() {
+    const tabs = tabsFor(state);
+    if (cur >= tabs.length) cur = tabs.length - 1;
+    const totalW = Math.min(COLS(), 100);
+    const innerW = totalW - 2; // 去掉左右框边
+
+    let body;
+    const key = tabs[cur][1];
+    if (key === 'overview') body = viewOverview(innerW);
+    else if (key === 'projects') body = viewProjects(innerW);
+    else if (key === 'team') body = viewTeam(innerW);
+    else if (key === 'rules') body = viewMarkdown(state.rulesMd, innerW);
+    else if (key === 'contracts') body = viewMarkdown(state.contractsMd, innerW);
+    else body = viewMarkdown(state.tasksMd, innerW);
+
+    const head = header(tabs, innerW);
+    const foot = ' ' + c.dim('1-' + tabs.length + '切屏 · q退出 · 每2s现场git推 · fs变即时刷');
+
+    // 高度预算：终端行数 - 顶栏(1) - 上框(1) - 分隔(1) - 下框(1) - 底提示(1) - 安全(1)
+    const rows = out.rows || 24;
+    const maxBody = Math.max(3, rows - 6);
+    let shown = body;
+    if (body.length > maxBody) { shown = body.slice(0, maxBody - 1); shown.push(c.dim(' …（终端太矮，省略 ' + (body.length - maxBody + 1) + ' 行）')); }
+
+    const lines = [
+        ...head,
+        sepLine(innerW),
+        ...shown.map((ln) => boxLine(ln, innerW)),
+        botLine(innerW),
+        foot,
+    ];
+    return lines.join('\n');
+}
+
+/* ────────────────────────── 重绘 / 重扫 ────────────────────────── */
+
+let drawScheduled = false;
+/** 原地重绘：清屏 + 回到左上 + 写整帧。用微合并避免一拍多画。 */
+function render() {
+    if (drawScheduled) return;
+    drawScheduled = true;
+    setImmediate(() => {
+        drawScheduled = false;
+        if (!state) return;
+        // \x1b[H 回原点；\x1b[J 清到屏尾（配合 alt-screen，不滚动、无残影）
+        out.write('\x1b[H\x1b[J' + frame());
+    });
+}
+
+/** 重扫数据（跑 git，可能阻塞）→ 刷新缓存 → 重绘。只有定时器/文件监听调它。 */
+function rebuild() {
+    try { state = buildState(teamRoot); } catch { /* 单次重扫失败忽略，留旧帧 */ }
+    render();
+}
+
+/* ────────────────────────── 终端进入 / 退出 ────────────────────────── */
+
+let watcher = null, gitTimer = null, fsTimer = null, exited = false;
+
+/** 还原终端：退出备用屏、显示光标、关 raw、清定时器/监听。幂等。 */
+function cleanup() {
+    if (exited) return;
+    exited = true;
+    clearInterval(gitTimer);
+    clearTimeout(fsTimer);
+    try { watcher?.close(); } catch { /* ignore */ }
+    if (out.isTTY) {
+        try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+        out.write('\x1b[?25h');    // 显示光标
+        out.write('\x1b[?1049l');  // 退出 alt-screen，还原进入前的屏内容
+    }
+    process.stdin.pause();
+}
+
+function enterTui() {
+    if (out.isTTY) {
+        out.write('\x1b[?1049h'); // 进 alt-screen（独立缓冲，退出原样还原）
+        out.write('\x1b[?25l');  // 隐藏光标
+    }
+    // 键盘：raw 模式下 Ctrl+C 不再走 SIGINT，必须在 keypress 里自己处理
+    readline.emitKeypressEvents(process.stdin);
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('keypress', onKey);
+
+    // 退出兜底：进程任何方式退出都还原终端
+    process.on('exit', cleanup);
+    // raw 模式下 Ctrl+C 走 keypress；但若 raw 没生效 / 被外部 kill -INT，信号仍要还原终端
+    process.on('SIGINT', () => { cleanup(); process.exit(0); });
+    process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+}
+
+function onKey(str, key) {
+    if (!key) return;
+    // 退出：q / Q / Ctrl+C / Esc
+    if (key.name === 'q' || (key.ctrl && key.name === 'c') || key.name === 'escape') {
+        cleanup();
+        process.exit(0);
+        return;
+    }
+    // 数字切屏（仅在范围内）
+    const tabs = tabsFor(state);
+    const n = parseInt(str, 10);
+    if (n >= 1 && n <= tabs.length) {
+        cur = n - 1;
+        render(); // 纯缓存重绘，不碰 git → 切屏零延迟
+        return;
+    }
+    // ← / → 也支持切屏
+    if (key.name === 'left') { cur = (cur - 1 + tabs.length) % tabs.length; render(); }
+    else if (key.name === 'right') { cur = (cur + 1) % tabs.length; render(); }
+    else if (key.name === 'r') { rebuild(); } // r 手动刷新
+}
+
+/* ────────────────────────── 主流程 ────────────────────────── */
 
 function main() {
-    const portArg = process.argv.indexOf('--port');
-    const port = portArg > -1 ? Number(process.argv[portArg + 1]) : 4500;
-    const root = findTeamRoot();
-    if (!root) {
+    teamRoot = findTeamRoot();
+    if (!teamRoot) {
         console.error('没找到团队根（向上没发现 .tvs-boss/）。先在项目目录跑 /tvs-boss 建团。');
         process.exit(1);
     }
-    createServer((req, res) => {
-        if (req.url === '/events') {
-            res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-            const push = () => res.write(`data: ${JSON.stringify(buildState(root))}\n\n`);
-            push();
-            // 文件变即时推（记忆 / 在岗名单）
-            let fsTimer = null;
-            let watcher;
-            try {
-                watcher = watch(join(root, '.tvs-boss'), () => {
-                    clearTimeout(fsTimer);
-                    fsTimer = setTimeout(push, 150); // 抖动合并
-                });
-            } catch { /* 平台不支持 watch 时降级靠下面的定时推 */ }
-            // git 活跃态：每 2s 兜底重扫推一次
-            const timer = setInterval(push, 2000);
-            req.on('close', () => { clearInterval(timer); clearTimeout(fsTimer); watcher?.close(); });
-        } else {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(PAGE);
-        }
-    }).listen(port, () => {
-        console.log(`tvs-boss 面板已起：http://localhost:${port}  （团队根 ${root}）`);
-        console.log('浏览器打开；SSE 实时推送（文件变即时 / git 每 2s）；键盘 1-5 切 tab；Ctrl+C 关闭。');
-    });
+
+    enterTui();
+    rebuild(); // 首帧
+
+    // 实时一：fs.watch 文件变即时重扫（150ms 抖动合并）
+    try {
+        watcher = watch(join(teamRoot, '.tvs-boss'), () => {
+            clearTimeout(fsTimer);
+            fsTimer = setTimeout(rebuild, 150);
+        });
+    } catch { /* 平台不支持 watch 时降级，靠下面的定时重扫 */ }
+
+    // 实时二：每 2s 兜底重扫 git
+    gitTimer = setInterval(rebuild, 2000);
+
+    // 窗口尺寸变化 → 仅重绘（不必重扫数据）
+    out.on('resize', render);
 }
 
 if (process.argv[1]?.endsWith('panel.mjs')) main();

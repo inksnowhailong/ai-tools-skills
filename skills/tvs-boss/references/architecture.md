@@ -41,4 +41,4 @@ git（不落盘）         谁在哪条分支干什么（快变量，现推）  
 - 角色：`agent-roles.md` + `scripts/team-roles.json`
 - 记忆：`memory-design.md`（落到 `.tvs-boss/` 三件套）
 - 跨项目：`contract-protocol.md`
-- 看板：`scripts/panel.mjs`
+- 看板：`scripts/panel.mjs`（终端 ANSI TUI，键盘 1~5 切屏）
