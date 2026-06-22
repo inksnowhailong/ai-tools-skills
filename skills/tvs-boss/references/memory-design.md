@@ -17,13 +17,13 @@
 leader 动态建团、崩溃恢复的地基。每个纳管项目一段：
 
 ```markdown
-## crestrail
-- path: E:/crestrail
-- repo: http://mind-git.im30.lan/crestrail/crestrail/
+## my-project
+- path: /workspace/my-project
+- repo: https://github.com/org/my-project
 - 主分支: main
 - 编制: dev×1
 ```
-> `主分支` 是项目固定属性（如某项目主线是 `shirehub` 而非 `main`），leader 判断"合主线"时认它。
+> `主分支` 是项目固定属性（如某项目主线是 `develop` 而非 `main`），leader 判断"合主线"时认它。
 
 ### `.tvs-boss/rules.md` —— 守则（必须遵守的硬规矩）
 分两段，几乎不变：
@@ -34,7 +34,7 @@ leader 动态建团、崩溃恢复的地基。每个纳管项目一段：
 - 提交信息说清"为什么"
 
 ## 各项目附加红线
-- way-community-server-api：主线是 shirehub，别对 main
+- （按实际项目填写，如：某项目主线是 develop 而非 main）
 ```
 
 ### `.tvs-boss/contracts.md` —— 跨项目契约（仅多项目协作时）
@@ -54,4 +54,3 @@ leader 动态建团、崩溃恢复的地基。每个纳管项目一段：
 git（活跃态）         ：谁在哪条分支干什么          —— 现推，不落盘
 ```
 
-> 历史上有过 `live-agents.json`（在岗 spawn 名单快照，给面板"团队"tab 用）。现已废弃：面板遵循"只呈现 git 派生 + 真实文件原文、不呈现需人工同步的运行态"，团队屏已移除，leader 不再落这个盘。

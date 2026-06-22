@@ -39,7 +39,7 @@
 **② 热 dev 工作集封顶 = 4。** 同时最多留 4 个常驻 dev,要 dev 且已满 → **LRU 踢掉最久没碰的那个**。谁热谁冷由你的真实操作自动算出，不用手动标。
 
 **③ 三档回收（按角色性质，回收激进度 = 1 ÷ 冷启动成本 × 复用概率）：**
-- **粘住档（dev/实现类）**：任务完成不立刻关。关的触发只有三个——该项目没在途活了 / 工作集满了被 LRU 挤 / **max-idle 到顶**。
+- **粘住档（dev/实现类）**：任务完成不立刻关。**同项目、同一条线的连续任务（实现→补丁→改 review→commit）必须复用同一个 dev——用 `SendMessage` 给还活着的它续派，绝不为下一步重新 spawn**（重 spawn = 新人重读记忆工程/代码，白付一遍冷启动；这是最常见、也最该避免的浪费）。只有它已 dormant 叫不回时才现起新的。关的触发只有三个——该项目没在途活了 / 工作集满了被 LRU 挤 / **max-idle 到顶**。
 - **召之即来档（review·security·analyst·architect·planner·qa-tester·debugger·tracer·scientist·writer·git-master 等只读共享）**：派一次性任务、干完它自然完成转 dormant（不主动 keep-alive，下次现起）。
 - **一次性档（explore·document-specialist·vision 等 cheap）**：spawn→干→返回即结束，从不 keep-alive。
 
@@ -52,6 +52,12 @@
 **⑥ 主会话保护。** 所有角色只向 leader 回**摘要**、不回灌大段输出——防主上下文爆窗，也省额度。
 
 **⑦ 回收的真实边界。** shutdown 只对还活着的 agent 有效；dormant（`idleReason: "available"`）不读邮箱、杀不动，但也不耗资源——放着即可，绝不反复发 shutdown。列表要清干净只能 `/clear` 或重开会话（团队记忆在 `.tvs-boss/`，`/tvs-boss` 秒恢复）。
+
+**⑧ 防爆不靠换人，靠 auto-compact + 复用。** 担心"一个 dev 一直干、上下文爆"——其实子 agent 跟主会话一样有 **harness 级 auto-compact**，上下文满会自动压缩、不会真撑死，这层不用 leader 操心。**别拿"摘要交接换新人"当常规防爆手段**——那要付新人冷启动（重读记忆/代码），通常比让它带着历史多跑几轮更贵。省 token 的正解是 **少 spawn + 复用活着的 dev**，不是跟单个 agent 的上下文死磕。
+
+**⑨ 变重了 → 上报 boss 执行 compact（leader 无权代劳）。** 判断一个 dev "变重"，**主看行为信号**：它开始重复犯已纠正的错 / 忘记早期约定 / 回报质量下滑跑偏——这些比数 token 靠谱（leader 本就读不到子 agent 的真实 token 占用）；**辅看代理指标**：连续派活 ≥6 次 / 跨很多模块 / 回报体量持续变大。触发时 leader **只上报、不代劳**，明确告诉 boss：「`<agent>` 已连续接 X 个任务、跨 A/B 模块、刚犯了已纠正的 Y，疑似偏重，建议你去它执行 `/compact`」——**compact 只有 boss 能进那个 agent 执行，leader 没有触发别人 compact 的工具**。
+
+**⑩ 换人：leader 申请、boss 决断。** 仅当某 dev 又重（达⑨信号）、compact 也救不动、还必须继续长期干时，leader 才**向 boss 申请**换新 dev 并说清理由；**换不换由 boss 拍板**，leader 不擅自换。
 
 > **在岗名单不再落盘。** 历史上 leader 会把在岗 spawn 名单写进 `.tvs-boss/live-agents.json` 供面板"团队"tab 显示；现已废弃——面板遵循"只呈现 git 派生 + 真实文件原文、不呈现需人工同步的运行态"，已移除团队屏。leader 无需再维护该文件。
 

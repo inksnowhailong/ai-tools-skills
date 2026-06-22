@@ -22,10 +22,12 @@ AIConfig/
 ├── skills/
 │   ├── tvs-analyze/
 │   ├── tvs-architect/
+│   ├── tvs-boss/
 │   ├── tvs-cc-migrator/
 │   ├── tvs-clean-code/
 │   ├── tvs-code-reviewer/
 │   ├── tvs-deep-interview/
+│   ├── tvs-hud/
 │   ├── tvs-init-memory-system/
 │   ├── tvs-inksnow-arch/
 │   ├── tvs-mind-seed/
@@ -105,6 +107,13 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 | `tvs-deep-interview` | 中文深度需求访谈，通过单问题追问、拓扑确认、歧义评分和审批闸门，把模糊想法变成规格。 | 用户需求不清、怕做错方向、需要先问清楚再实现。 | Cursor、Claude Code、Codex、Cline、Roo |
 | `tvs-clean-code` | 清理代码结构、命名、冗余和注释，让意图更清晰。 | 代码可读性差、函数太乱、需要补关键中文注释。 | Cursor、Claude Code、Codex、Cline |
 | `tvs-code-reviewer` | 稳定、证据驱动的代码审查，按固定通道找漏洞、坏味道和真实问题。 | 审当前 diff、审 PR、找 bug、找坏代码、毒舌审查。 | Cursor、Claude Code、Codex、Cline |
+
+### 多项目团队与状态监控
+
+| Skill | 简介 | 应用场景 | 适合工具 |
+|---|---|---|---|
+| `tvs-boss` | 多项目 AI 开发团队 Leader：扫描本地 git 项目建团、调度各角色 Agent 开工、通过可视化 TUI 面板（进行中/任务/项目/守则）掌控全局，push 和合并主线必停等用户拍板。 | 想在一个 chat 里统一管多个项目、派 Agent 干活、看面板跟进进度。 | Claude Code |
+| `tvs-hud` | Claude Code 状态栏多行 HUD：第一行雷达告警（未提交太久/领先未合/落后/stash 积压/停滞任务），第二行按项目分组 git 状态 + 任务计数 + worktree，第三行任务标题预览；自适应 tvs-boss/tvs-task 是否安装，都没有时静默。 | 想在状态栏随时看各项目 git 健康度与任务进展，不用开面板。 | Claude Code |
 
 ### 协作、记忆与迁移
 

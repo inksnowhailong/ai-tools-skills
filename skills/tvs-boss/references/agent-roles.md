@@ -6,14 +6,16 @@
 
 1. 查 `scripts/team-roles.json` 该角色是否有 `omcSubagentType` 字段：
 
+   **两条路径都必须显式传 `model`**——不传会继承 leader 的全局默认（通常是 opus），导致所有角色全跑最贵档。
+   模型档从角色的 `tier` 字段读（有则用），否则从 `defaultModel` 反推：`deep→opus`、`fast→sonnet`、`cheap→haiku`。
+
    **有 `omcSubagentType`（18/19 角色）→ 优先路径：**
-   直接用 `Agent({ subagent_type: "<omcSubagentType>", prompt: "..." })`。
-   omc agent 自带 systemPrompt + 模型配置，**无需手动注入 systemPrompt，无需手动选模型**。
+   `Agent({ subagent_type: "<omcSubagentType>", model: "<tier>", prompt: "..." })`
+   omc agent 自带 systemPrompt，无需手动注入；但 **model 必须显式传**。
 
    **无 `omcSubagentType`（仅 `vision`）→ 降级路径：**
-   取 `systemPrompt` 手动注入通用 agent，按 `modelsByTarget.claude` 选模型：
-   - 角色有显式 `tier` 用它，否则从 `defaultModel` 反推（deep/fast/cheap）。
-   - ⚠️ `Agent` 工具的 `model` 参数填短枚举：`deep→opus`、`fast→sonnet`、`cheap→haiku`。
+   取 `systemPrompt` 手动注入通用 agent：
+   `Agent({ model: "<tier>", prompt: "<systemPrompt>\n\n<任务上下文>" })`
 
 2. **无论哪条路径，dev 场景都要通过 prompt 补注项目上下文**：`path / 主分支 / 当前需求`；只读/分析类角色可跨项目共享。
 
