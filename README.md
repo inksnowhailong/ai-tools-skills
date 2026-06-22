@@ -27,42 +27,118 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 
 ---
 
+## 推荐生态
+
+AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈、状态监控）。  
+以下三个第三方工具与本仓库深度协同，**`tvs-setup` 安装时会自动检测并给出安装建议**：
+
+| 工具 | 定位 | 与 AIConfig 的协同 |
+|---|---|---|
+| [**omc**](https://github.com/sschepis/oh-my-claudecode) (oh-my-claudecode) | Claude Code 多 Agent 编排层，协调专属 agent、HUD 状态栏、自治循环 | `tvs-hud` 与 omc HUD 合并输出到同一状态栏；`tvs-boss` 的 Leader 可借用 omc agent 类型调度 |
+| [**superpowers**](https://github.com/just-every/superpowers) | TDD 纪律、系统化调试、代码审查工作流 | 与 `tvs-code-reviewer`、`tvs-architect` 形成互补——superpowers 管过程纪律，tvs 管决策与记忆 |
+| [**codegraph**](https://github.com/nickvdyck/codegraph) | tree-sitter 解析的代码知识图谱，亚毫秒级符号/调用链查询 | `tvs-init-memory-system` 配置 codegraph 作为项目记忆的结构层；`tvs-architect` 和 `tvs-analyze` 优先走 codegraph 做代码理解 |
+
+> 三者均为可选增强，缺失时 AIConfig 所有功能正常降级运行。
+
+---
+
 ## Skills
 
 ### 项目理解与架构
 
-| Skill | 用途 |
-|---|---|
-| `tvs-analyze` | 分析项目结构、依赖、调用关系和风险点 |
-| `tvs-architect` | 基于真实代码证据做架构分析、复杂 bug 根因诊断 |
-| `tvs-inksnow-arch` | 访谈生成架构 RFC，批准后落地 `.cursor/rules` |
+**`tvs-analyze`** — 新项目破冰利器
+
+> 接手陌生代码库时最怕的不是代码量，是不知道从哪看起。`tvs-analyze` 系统性扫描项目结构、核心依赖、主要业务流和模块间调用关系，输出一份可以直接对话的全局地图。复杂项目 5 分钟内建立基本认知，再也不用从 README 猜架构。
+
+---
+
+**`tvs-architect`** — 架构级问题的首席顾问
+
+> 普通 AI 只会给你代码，`tvs-architect` 会给你**带证据的判断**。它锚定真实代码、拒绝空谈，做架构评审、技术方案取舍、复杂 bug 根因分析时，每个结论都对应具体的文件和调用链。想知道"为什么这样设计"、"改这里会影响哪里"——问它。
+
+---
+
+**`tvs-inksnow-arch`** — 架构决策从访谈到落地一体化
+
+> 架构重构最难的不是写代码，是想清楚。`tvs-inksnow-arch` 先用深度访谈逼你把模糊想法变成 RFC，批准后再自动生成 `.cursor/rules/*.mdc` 落地到项目。不再有"口头说好的架构，代码里从来没人遵守"——规则直接进 AI 上下文，每次写代码都会被检查。
+
+---
 
 ### 需求访谈与代码质量
 
-| Skill | 用途 |
-|---|---|
-| `tvs-deep-interview` | 单问题深度追问，把模糊想法变成规格文档 |
-| `tvs-clean-code` | 清理命名、冗余和结构，补关键中文注释 |
-| `tvs-code-reviewer` | 证据驱动的代码审查，找漏洞、坏味道和真实问题 |
+**`tvs-deep-interview`** — 把"大概是这样"变成可执行的规格
+
+> AI 做错方向是因为问题没说清，不是因为 AI 不够聪明。`tvs-deep-interview` 模拟专业需求访谈：单次只问一个问题、追问歧义、画拓扑确认、最后给出评分和审批闸门。走完一遍，你手里有规格文档，AI 手里有明确任务——双方都不再靠猜。
+
+---
+
+**`tvs-clean-code`** — 让代码说人话
+
+> 能跑的代码和好读的代码之间，往往差的不是功能，而是命名、结构和一句关键注释。`tvs-clean-code` 系统性清理函数命名、消除冗余逻辑、补上让下一个读代码的人不骂娘的中文注释。重构前跑一遍，技术债少一半。
+
+---
+
+**`tvs-code-reviewer`** — 挑剔的代码审查员，不讲情面
+
+> 不是"看起来没问题"，而是**证据驱动地找问题**。`tvs-code-reviewer` 按固定通道逐轮扫描：安全漏洞 → 逻辑缺陷 → SOLID 原则 → 性能隐患 → 代码坏味道，每条问题都标明严重等级和位置。PR 合并前过一遍，比队友 review 更稳、更快、更狠。
+
+---
 
 ### 多项目团队与状态监控
 
-| Skill | 用途 |
-|---|---|
-| `tvs-boss` | 多项目 AI 开发团队 Leader，调度 Agent 开工、TUI 面板跟进进度 |
-| `tvs-hud` | Claude Code 状态栏多行 HUD：雷达告警 / 项目 git+任务 / 任务标题预览 |
+**`tvs-boss`** — 一个 Chat 统管所有项目的 AI 开发团队
+
+> 你有多个项目同时在推进，每次都要开新对话、重新说背景——这是在浪费你最宝贵的注意力。`tvs-boss` 把当前目录下所有 git 项目纳为一个团队，你只需要下需求，Leader 自动调度 dev/review/test 等角色 Agent 协同开工。内置 ANSI TUI 面板，进行中的分支、任务状态、git 健康度一眼尽收，push 和合主线前必停等你拍板。
+
+---
+
+**`tvs-hud`** — 状态栏里的项目健康仪表盘
+
+> 不想为了看 git 状态去开终端，也不想为了看任务进度去开面板——`tvs-hud` 把这些信息直接打到 Claude Code 底部状态栏。三行多线索输出：**雷达行**告警未提交太久/领先未合/worktree 落后等风险；**项目行**按项目分组展示 git 状态和任务计数；**任务行**预览进行中的任务标题。与 omc HUD 共存，互不干扰。
+
+---
 
 ### 协作、记忆与迁移
 
-| Skill | 用途 |
-|---|---|
-| `tvs-task` | 自然语言转结构化任务账本（`~/.tasklog/active.md`） |
-| `tvs-init-memory-system` | 为项目部署记忆维护体系，配置 codegraph 分工路由 |
-| `tvs-team-spawn` | 为 Cursor 项目安装多 Agent 团队协作系统 |
-| `tvs-mind-seed` | 给单个 Agent 初始化私有记忆系统 |
-| `tvs-pullread` | 拉取并通读远程分支/PR，理解别人改了什么 |
-| `tvs-cc-migrator` | Claude Code 配置备份与恢复，换机器用 |
-| `tvs-setup` | 安装/更新/体检入口，软链优先、漂移检测、生态探测 |
+**`tvs-task`** — 用自然语言记任务，AI 帮你整理
+
+> 脑子里有个任务，打开任务管理软件又嫌麻烦——直接告诉 AI "帮我记一下，下午要改登录页"，`tvs-task` 把它结构化写入 `~/.tasklog/active.md`，支持迭代追加、git 合并检测、宽表渲染。任务账本跨项目全局，`tvs-hud` 和 `tvs-boss` 面板都能读取展示。
+
+---
+
+**`tvs-init-memory-system`** — 让 AI 真正"记住"这个项目
+
+> 每次开新对话都要重新介绍项目背景，是因为 AI 没有持久记忆。`tvs-init-memory-system` 为当前项目一次性部署结构化记忆体系：`.memory/` 存只有人才知道的业务契约，codegraph 存可以自动查的代码结构——分工明确，AI 每次都能快速召回上下文，不再靠你重复喂背景。
+
+---
+
+**`tvs-team-spawn`** — 为 Cursor 项目搭建多 Agent 协作系统
+
+> 一个 Chat 干所有事效率有上限。`tvs-team-spawn` 为 Cursor 项目一次性安装 leader/sub agent 协作基础设施：邮箱通信、共享黑板、stop hook，让多个 Agent 真正能分工并行、有序交接，而不是各说各话。
+
+---
+
+**`tvs-mind-seed`** — 给 Agent 一个可恢复的画像
+
+> `tvs-team-spawn` 之后，每个成员 Agent 只是个空壳。`tvs-mind-seed` 给它初始化私有记忆系统：profile、personality、active 任务、记忆索引——让 Agent 知道自己是谁、负责什么、上次干到哪，会话重开后秒速恢复状态。
+
+---
+
+**`tvs-pullread`** — 真正读懂别人的 PR
+
+> "看一下这个 PR 改了什么"——大多数时候 AI 只会读你贴过来的 diff，看不到上下文。`tvs-pullread` 直接拉取远程分支，通读真实代码变更，理解业务意图、分析潜在影响，给你一份有判断的阅读报告，不是 diff 的复读机。
+
+---
+
+**`tvs-cc-migrator`** — Claude Code 配置一键迁移
+
+> 换新电脑最怕的就是把 `~/.claude` 里精心积累的配置全丢掉。`tvs-cc-migrator` 把 rules、skills、commands、agents、settings、hooks 打包备份，到新机器一键恢复。搭配 `tvs-setup` 重装 skill 软链，五分钟复原完整工作环境。
+
+---
+
+**`tvs-setup`** — 本仓库的安装、体检与生态大管家
+
+> AIConfig 的唯一入口。软链安装（仓库即真相，`git pull` 即更新，零漂移）、漂移检测、死引用扫描、孤儿清理，以及探测 omc / superpowers / codegraph 生态并给出安装建议。日常说"体检一下 skill"就够了，它会告诉你哪里有问题、怎么修。
 
 ---
 
@@ -70,9 +146,9 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 
 | 文件 | 说明 |
 |---|---|
-| `role.md` | AI 助手角色定位、交付方式、代码质量意识 |
-| `coding-rules.md` | 编码风格、TypeScript 约定、注释规范、`data-alt` 规则 |
-| `fontFace.json` | 字体相关配置数据 |
+| `role.md` | AI 助手角色定位、交付方式、代码质量意识与颜文字风格 |
+| `coding-rules.md` | 编码风格、TypeScript 约定、注释规范、Tailwind/UnoCSS 样式规则、`data-alt` 规范 |
+| `fontFace.json` | 字体相关配置数据（按需查阅） |
 
 ---
 
@@ -82,6 +158,9 @@ https://github.com/inksnowhailong/ai-tools-skills.git
 # 克隆并安装（软链，仓库即真相）
 git clone https://github.com/inksnowhailong/ai-tools-skills.git
 node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
+
+# 体检
+node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs doctor
 
 # 更新
 node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs update --pull
