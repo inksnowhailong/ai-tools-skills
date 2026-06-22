@@ -1,6 +1,7 @@
 ---
 name: tvs-setup
 description: 当用户说"安装/更新 tvs skill、tvs setup、体检一下 skill、doctor、检查 skill 安装状态、装到新机器、skill 同步了吗、有没有漂移、清理旧 skill"时使用。作用：调用随包 scripts/tvs.mjs（detect/install/doctor）完成本仓库 skills 的安装（软链优先）、更新与体检（漂移/死引用/frontmatter/孤儿/断链），并探测 omc、superpowers、codegraph 生态增强是否就绪，缺失时给出官方安装建议——tvs 专注差异化能力，重叠能力推荐生态最强者补足。
+disable-model-invocation: true
 ---
 
 # tvs-setup：安装、体检与生态增强

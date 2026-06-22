@@ -6,18 +6,18 @@
 ## 一、收到一条需求
 
 1. **归项目**：判断属于 `projects.md` 里哪个项目。不属于任何已纳管项目 → 反问 boss 要不要先把它登记进来。
-2. **判断要哪个角色**：实现走 dev/executor；要先理需求走 analyst；要查结构走 explore + codegraph；要架构判断走 architect……（全表见 `agent-roles.md`）。
+2. **判断要哪个角色**：全表见 `agent-roles.md`
 3. **spawn**：用 `Agent` 工具起对应角色——
    - **subagent_type 用通用 agent**，把该角色在 `agent-roles.md` 里的 `systemPrompt` 注入；按角色的模型档（deep/fast/cheap）选模型。
    - **dev 绑项目**：注入项目 `path / 主分支 / 这条需求`；默认在项目目录直接干，只有"同项目并行多 dev 改同 repo"才用 worktree。
-   - review/test/architect 等共享角色不绑项目，用完即可回收。
+   - review/test 等共享角色不绑项目,只注入需求上下文，以及注入全局中合适的skill,且任务结束后就删掉
 
 ## 二、推任务过流水线（状态靠 git 现推，不落盘）
 
 工作流仍是这条线，但**它是你脑子里和 git 里的，不写进记忆**：
 
 ```
-派活 → 编码 → 审查 → 测试 → 待提交 → 完成
+派活 → 编码 → 审查 → 测试(低风险修改可以跳过) → 待提交 → 完成
         │        │
        打回 ◀────打回（退回重做，附问题清单）
 ```
@@ -28,16 +28,7 @@
 
 ## 三、借力全局 skill（装了就用，没装也跑）
 
-在合适时机让角色调用已装的全局能力（用 `tvs-setup detect` 可知装了哪些）：
-
-| 时机 | 借力 |
-|---|---|
-| 需求模糊 | `tvs-deep-interview` 先问清 |
-| dev 动手前摸结构 | `codegraph`（查定义/调用链/影响面） |
-| dev 收尾清理 | `tvs-clean-code` |
-| 审查关 | `tvs-code-reviewer` |
-
-缺了这些不影响主流程——团队自带角色就能跑完，全局 skill 只是增强。
+在合适时机让角色调用已装的全局各种Skill能力
 
 ## 四、温常驻 v2 —— 懒启动 + 工作集封顶 + 缓存对齐
 
@@ -45,7 +36,7 @@
 
 **① 懒启动——启动/恢复时一个员工都不 spawn。** leader 只读 `projects.md` 知道有哪些项目；**任务真来了，才 spawn 那个项目的 dev**。零预热、零空转。崩溃恢复同理（读记忆 + 现 git，不预 spawn 任何人）。
 
-**② 热 dev 工作集封顶 = 3。** 同时最多留 3 个常驻 dev（正好咬住"2-3 个热项目"）。第 4 个项目要 dev 且已满 → **LRU 踢掉最久没碰的那个**。谁热谁冷由你的真实操作自动算出，不用手动标。
+**② 热 dev 工作集封顶 = 4。** 同时最多留 4 个常驻 dev,要 dev 且已满 → **LRU 踢掉最久没碰的那个**。谁热谁冷由你的真实操作自动算出，不用手动标。
 
 **③ 三档回收（按角色性质，回收激进度 = 1 ÷ 冷启动成本 × 复用概率）：**
 - **粘住档（dev/实现类）**：任务完成不立刻关。关的触发只有三个——该项目没在途活了 / 工作集满了被 LRU 挤 / **max-idle 到顶**。
@@ -60,16 +51,13 @@
 
 **⑥ 主会话保护。** 所有角色只向 leader 回**摘要**、不回灌大段输出——防主上下文爆窗，也省额度。
 
-**⑦ 回收的真实边界（实测铁律，别再踩）。** "关掉一个角色"只对**还活着、在处理消息的** agent 有效：发结构化 `shutdown_request`（`SendMessage` 的 `message={"type":"shutdown_request",...}`）→ 它 approve → 终结。**已完成、转入 dormant 的子 agent（心跳 `idleReason: "available"`）杀不动**——它不再读邮箱，shutdown 唤不动它去 approve，反复发只会收到更多 idle 回执（这是空耗轮次的 bug）。但 dormant agent **不耗算力、不烧钱**，只是名字挂在列表里。所以：
-- max-idle / LRU 的"关"只对**被 keep-alive 的常驻角色**生效；对干完即 dormant 的角色，既无强杀手段、也无需强杀（它已不占资源）。
-- **leader 绝不对 dormant agent 反复发 shutdown**。看到 `idleReason: "available"` 就认定"已交付、闲置无害"，放着不管。
-- 列表要彻底清干净，只能 `/clear` 或重开会话——团队记忆在 `.tvs-boss/`，重开 `/tvs-boss` 秒恢复，无损失。
+**⑦ 回收的真实边界。** shutdown 只对还活着的 agent 有效；dormant（`idleReason: "available"`）不读邮箱、杀不动，但也不耗资源——放着即可，绝不反复发 shutdown。列表要清干净只能 `/clear` 或重开会话（团队记忆在 `.tvs-boss/`，`/tvs-boss` 秒恢复）。
 
 > **在岗名单不再落盘。** 历史上 leader 会把在岗 spawn 名单写进 `.tvs-boss/live-agents.json` 供面板"团队"tab 显示；现已废弃——面板遵循"只呈现 git 派生 + 真实文件原文、不呈现需人工同步的运行态"，已移除团队屏。leader 无需再维护该文件。
 
 ## 五、被问"现在啥情况"
 
-现场扫：对每个项目 `git -C <path> branch --show-current` / 最近 commit，汇总成人话报给 boss——哪个项目哪条分支在推进、哪个等他拍板。（将来由网页面板替你渲染，当前先口述。）
+现场扫：对每个项目 `git -C <path> branch --show-current` / 最近 commit，汇总成人话报给 boss——哪个项目哪条分支在推进、哪个等他拍板。（将来由面板替你渲染，当前先口述。）
 
 ## 六、崩溃恢复
 

@@ -1,6 +1,7 @@
 ---
 name: tvs-inksnow-arch
 description: 项目架构初始化与重构一体 Skill。何时使用：用户表达"我想重构架构 / 想改成 DDD / 想拆模块 / 想改成单端或多端 / 想拆掉 Redux 或 Pinia / 想初始化项目 .cursor/rules 架构规则 / 让 AI 知道代码该放哪 / 想梳理目录结构 / 项目越来越乱不知道在哪写新代码 / 重新整理分层 / 想定一套架构规范"等架构方向变更类需求时激活。作用：先访谈锁定架构决策（优先调用 tvs-deep-interview skill；不可用时走内置简化协议），产出 docs/architecture-refactor-rfc.md 等用户批准；再扫描项目当前结构并按 RFC 决议生成 .cursor/rules/*.mdc 强制约束，一次完成"想清楚"和"固化下来"两件事。不要在仅做单点 bug 修复、改文案、或对架构无变更的业务功能开发任务中激活。
+disable-model-invocation: true
 ---
 
 # tvs-inksnow-arch：架构决策 + 规则落地 一体 Skill

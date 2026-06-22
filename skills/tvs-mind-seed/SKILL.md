@@ -1,6 +1,7 @@
 ---
 name: tvs-mind-seed
 description: 当用户要为某个 agent/chat 初始化私有记忆（初始化记忆、mind seed、给成员建记忆），或 tvs-team-spawn 部署完团队后为成员建记忆时使用。定位：随 tvs-team-spawn 主要服务 Cursor 团队场景；Claude Code 下的独立 chat 记忆建议优先用其原生记忆能力。作用：对话引导收集角色定位、关注点、沟通风格、边界，生成精简三件套（identity/memory-active/memory-raw）JSON；chat 崩溃后再开可读回恢复。
+disable-model-invocation: true
 ---
 
 # tvs-mind-seed：单 Agent 记忆初始化

@@ -1,18 +1,21 @@
 # Agent 角色目录
 
-团队自带 **19 个角色**，复刻自 `tvs-team-spawn`、**零外部依赖**（不靠 omc）。完整定义（`systemPrompt` / 建议工具 / 模型档 / 记忆提示）在 **`scripts/team-roles.json`**，本文件是给 leader 看的索引 + spawn 规矩。
+团队自带 **19 个角色**，完整定义（`systemPrompt` / 建议工具 / 模型档 / 记忆提示）在 **`scripts/team-roles.json`**，本文件是给 leader 看的索引 + spawn 规矩。
 
 ## leader 怎么 spawn 一个角色
 
-1. 从 `scripts/team-roles.json` 取该角色的 `systemPrompt`。
-2. 用 `Agent` 工具起一个 **subagent_type 为通用 agent** 的成员，把 `systemPrompt` 注入；
-3. **按角色的模型档选模型**（`team-roles.json` 的 `modelsByTarget.claude`）：
-   - `deep` = `claude-opus-4-8`（架构/审查/分析这类重推理角色）
-   - `fast` = `claude-sonnet-4-6`（常规实现）
-   - `cheap` = `claude-haiku-4-5-20251001`（只读探索：explore / document-specialist / vision）
-   - 角色有显式 `tier` 用它，否则按 `defaultModel` 反推。
-   - ⚠️ **`Agent` 工具的 `model` 参数填短枚举**（`opus`/`sonnet`/`haiku`），不是上面的全 ID：`deep→opus`、`fast→sonnet`、`cheap→haiku`。传全 ID（如 `claude-opus-4-8`）会被拒。
-4. **dev 场景绑项目**：实现类角色服务某项目时，注入项目 `path / 主分支 / 需求`；只读/分析类角色可跨项目共享。
+1. 查 `scripts/team-roles.json` 该角色是否有 `omcSubagentType` 字段：
+
+   **有 `omcSubagentType`（18/19 角色）→ 优先路径：**
+   直接用 `Agent({ subagent_type: "<omcSubagentType>", prompt: "..." })`。
+   omc agent 自带 systemPrompt + 模型配置，**无需手动注入 systemPrompt，无需手动选模型**。
+
+   **无 `omcSubagentType`（仅 `vision`）→ 降级路径：**
+   取 `systemPrompt` 手动注入通用 agent，按 `modelsByTarget.claude` 选模型：
+   - 角色有显式 `tier` 用它，否则从 `defaultModel` 反推（deep/fast/cheap）。
+   - ⚠️ `Agent` 工具的 `model` 参数填短枚举：`deep→opus`、`fast→sonnet`、`cheap→haiku`。
+
+2. **无论哪条路径，dev 场景都要通过 prompt 补注项目上下文**：`path / 主分支 / 当前需求`；只读/分析类角色可跨项目共享。
 
 ## 19 角色一览
 

@@ -1,6 +1,7 @@
 ---
 name: tvs-boss
 description: 多项目 AI 开发"老板/团队"系统——把你从挨个手动指挥多个 Claude 实例，提升为只下需求、拍板的团队负责人/架构师。敲 /tvs-boss：扫当前目录把团队拉起来，当前这个 chat 当场变成常驻 leader，一个 leader 调度，各项目独立 dev + 全队共享角色池，自动跑"分发→编码→审查→测试→提交"。当用户要"管多个项目的AI团队 / 起一个开发团队 / leader调度 / 多agent团队 / 让AI替我分发审查提交"时使用。
+disable-model-invocation: true
 ---
 
 # tvs-boss：多项目 AI 开发团队
@@ -49,21 +50,14 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - **温常驻（懒启动）**：启动/恢复时不预 spawn 任何角色，**任务来了才起**；热 dev 工作集封顶 3（满了 LRU 踢）；按角色三档回收 + max-idle 天花板（细则见 `leader-protocol.md` 第四节）。
 - **完成语义**：commit 到功能分支可自动；**push / 合并主线必须停下等用户确认**。
 - **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史、不存"谁此刻在干什么"**（那靠 git 分支现推）。一旦越存越多，就是混进了多余的东西。
-- **零外部依赖**：角色自带（复刻在 skill 内），不依赖 omc 等；leader 可在合适时机调用已装的全局 skill 增强，但缺了也能跑。
+- **外部依赖**：leader 可在合适时机调用已装的全局 skill 增强。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
 - `references/leader-protocol.md` —— 运行细则：调度循环 / stage（靠 git 推） / 确认规则 / 温常驻 / 借力全局 skill。
-- `references/agent-roles.md` —— 自带角色目录（复刻自 tvs-team-spawn，零依赖）。
+- `references/agent-roles.md` —— 自带角色目录
 - `references/memory-design.md` —— 团队记忆三件套（projects / rules / contracts）的格式与"有界"铁律。
 - `references/architecture.md` —— 整体形状 + 决策。
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），leader spawn 时读它取 systemPrompt + 模型档。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，屏序 **进行中/任务/项目/守则/契约**（无 active.md 时无「任务」屏）。键位：**←→ 或 1~N 切屏；↑↓ 或 j/k 滚一行，PgUp/PgDn 翻页，g/G 跳首尾；q/Ctrl+C 退出**（横向键管 tab、纵向键管滚动）。
-  - **屏1「进行中」(默认，项目视角)**：只列在动项目（有在途分支），按 项目→在途分支(⎇+↑↓/dirty/最近活跃)→该分支对应 tvs-task 任务(└ ID 标题 状态图标+进度) 分组。任务↔分支按 active.md「项目」字段的 (仓库,分支) 归一路径匹配，匹配不到只显分支。顶部一行 `⚠ 需关注` 告警（仅 未提交太久/落后/领先没合/任务停滞 时冒出，平时不占地方；原独立雷达屏已并入此处）。
-  - **屏2「任务」(任务视角，清爽)**：读 active.md（parseActiveTasks 解析），按状态分组（◑进行中/◔停滞/○待开始/·其他），每条 ID·标题·进度·项目，对齐一眼扫完；不堆原文。
-  - **屏3「项目」(纯 git)**：每项目分支/主分支/dirty/ahead·behind/stash/在途分支+各自活跃时间/最近提交。
-  - **展示原则**：只呈现 git 派生 + 真实文件原文（active.md/rules/contracts），即时读就准；不呈现需人工同步的运行态。
-  - 阈值（STALE_DAYS/AHEAD_PR/BEHIND_REBASE/TASK_STALE_DAYS/REFRESH_MS）在 panel.mjs 顶部常量块一处可调。Tokyo Night 柔和 256-color、无色降级；统一符号（◆logo·⎇分支·●N改·↑↓·◑/◔/○任务态，宽度1替 emoji 护对齐）；CJK 按显示宽度对齐恒框宽；圆角外框；纵向滚动不截断、边线滚动指示；git 异步扫、每 REFRESH_MS(默认4s) 后台静默重扫、数据没变不重绘、按键即时从缓存渲染（滚动丝滑）。`--root` 接 团队根 / `.tvs-boss` 目录 / 子目录都能解析，不依赖 cwd。
-- `scripts/open-panel.mjs` —— **跨平台开窗器**：`node scripts/open-panel.mjs [--root <团队根>] [--print]`，检测平台弹一个新终端窗口跑面板（Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app；linux 用 $TERMINAL 兜底；都没有就当前终端直跑）。窗口/spawn 逻辑的**单一真源**——leader 的「看面板」和生成的启动器都走它。panel.mjs 路径由自身位置推出、团队根 --root/探测，零硬编码；`--print` 只打印将执行命令（dry-run）。
-- `scripts/make-launcher.mjs` —— **启动器生成器**：`node scripts/make-launcher.mjs --root <团队根>`，往 `<团队根>/.tvs-boss/` 生成双击即用的启动器（Windows `panel.cmd` + mac `panel.command`）。生成的是**薄壳**：只自定位团队根 + 调 `open-panel.mjs`（开窗逻辑不在启动器里）。**启动器是按团队生成的运行态产物，落在团队根、不进 skill 源码**（见启动协议第 4 步）。
+- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，屏序 **进行中/任务/项目/守则/契约**（无 active.md 时无「任务」屏）。
