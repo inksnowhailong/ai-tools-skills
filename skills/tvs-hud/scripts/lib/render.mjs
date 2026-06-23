@@ -30,18 +30,18 @@ function gitStr({ dirty, ahead, behind }) {
 function taskCountStr(tasks) {
   const n = icon => tasks.filter(t => t.icon === icon).length;
   return [
-    n('◑') && `${C.CYAN}*${n('◑')}${C.R}`,
-    n('◔') && `${C.YELLOW}!${n('◔')}${C.R}`,
-    n('○') && `${C.GRAY}·${n('○')}${C.R}`,
+    n('◑') && `🔥${C.CYAN}${n('◑')}${C.R}`,
+    n('◔') && `💤${C.YELLOW}${n('◔')}${C.R}`,
+    n('○') && `⏳${C.GRAY}${n('○')}${C.R}`,
   ].filter(Boolean).join(' ');
 }
 
-/** worktree 紧凑片段：[feat/auth ↓19] */
+/** worktree 紧凑片段：🌿feat/auth ↓19 */
 function worktreeChunks(repoPath) {
   return worktreesOf(repoPath).map(wt => {
     const name = wt.branch.length > 18 ? wt.branch.slice(0, 17) + '…' : wt.branch;
     const gs   = gitStr(wt);
-    return `${C.GRAY}[${C.R}${C.MAUVE}${name}${C.R} ${gs}${C.GRAY}]${C.R}`;
+    return `🌿${C.MAUVE}${name}${C.R} ${gs}`;
   });
 }
 
@@ -75,25 +75,36 @@ export function projectLine(projects, allTasks, cfg) {
 }
 
 /**
- * 行2：任务详情行（标题预览，最多 6 条）。
- * @param {{ title: string, icon: string }[]} allTasks
- * @param {{ taskTitleLen: number }} cfg
+ * 行2：任务详情行（标题预览，最多 8 条）。
+ * 当前所在项目（cwd 落在其路径内）的任务整体排到最前，组内再按 进行中→停滞→待开始。
+ * @param {{ title: string, icon: string, paths: string[] }[]} allTasks
+ * @param {{ taskTitleLen: number, taskLineMax?: number }} cfg
+ * @param {string} [cwd] 当前工作目录，用于"本项目优先"排序
  * @returns {string}
  */
-export function taskLine(allTasks, cfg) {
-  const max   = cfg.taskLineMax ?? 8;
+export function taskLine(allTasks, cfg, cwd) {
+  const max = cfg.taskLineMax ?? 8;
+
+  // 本项目优先：cwd 命中某任务的项目路径（同路径或在其子目录内）则提前
+  const cwdNorm   = normPath(cwd ?? '');
+  const inCurrent = t => cwdNorm && t.paths.some(p => cwdNorm === p || cwdNorm.startsWith(p + '/'));
+  const iconRank  = { '◑': 0, '◔': 1, '○': 2 };  // 进行中→停滞→待开始
+
   const shown = [...allTasks]
-    .sort((a, b) => (a.icon === '◑' ? -1 : b.icon === '◑' ? 1 : 0))
+    .sort((a, b) => {
+      const ca = inCurrent(a) ? 0 : 1, cb = inCurrent(b) ? 0 : 1;
+      if (ca !== cb) return ca - cb;                            // 本项目整体提前
+      return (iconRank[a.icon] ?? 9) - (iconRank[b.icon] ?? 9); // 组内按状态
+    })
     .slice(0, max);
 
-  const ICON = { '◑': '*', '◔': '!', '○': '·' };
+  const ICON = { '◑': '🔥', '◔': '💤', '○': '⏳' };
   const parts = shown.map(({ title, icon }) => {
-    const color   = icon === '◑' ? C.CYAN : icon === '◔' ? C.YELLOW : C.GRAY;
     const sym     = ICON[icon] ?? icon;
     const clipped = title.length > cfg.taskTitleLen
       ? title.slice(0, cfg.taskTitleLen) + '…'
       : title;
-    return `${color}${sym}${C.R} ${clipped}`;
+    return `${sym} ${clipped}`;
   });
 
   const rest = allTasks.length > max ? ` ${C.GRAY}+${allTasks.length - max}${C.R}` : '';

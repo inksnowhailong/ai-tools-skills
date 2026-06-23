@@ -16,9 +16,9 @@ Claude Code 底部状态栏的 tvs 数据源，最多输出三行，自适应四
 ## 状态栏输出示例
 
 ```
-tvs-雷达 !6  │  shirehub_web ↑28 未合并  ·  crestrail ~1 未提交3天  ·  ! tvs-task停5天  ·  ...
-tvs-boss     │  crestrail ~1 ·2  │  shirehub ✓ *1  │  shirehub_web ~5↑28 *2 !1  [feat/cdk ↓19]
-tvs-tasks    │  * ShireHub发帖页面  │  * 架构重构  │  ! tvs-task优化  │  · 记忆工程  +2
+tvs-雷达 🚨6  │  shirehub_web ↑28 未合并  ·  crestrail ~1 未提交3天  ·  💤 tvs-task停5天  ·  ...
+tvs-boss     │  crestrail ~1 ⏳2  │  shirehub ✓ 🔥1  │  shirehub_web ~5↑28 🔥2 💤1  🌿feat/cdk ↓19
+tvs-tasks    │  🔥 ShireHub发帖页面  │  🔥 架构重构  │  💤 tvs-task优化  │  ⏳ 记忆工程  +2
 ```
 
 ### 符号说明
@@ -36,11 +36,13 @@ tvs-tasks    │  * ShireHub发帖页面  │  * 架构重构  │  ! tvs-task�
 
 | 符号 | 含义 |
 |------|------|
-| `*N` | N 个进行中任务 |
-| `!N` | N 个停滞任务（进行中 > 5 天未更新） |
-| `·N` | N 个待开始任务 |
+| `🔥N` | N 个进行中任务 |
+| `💤N` | N 个停滞任务（进行中 > 5 天未更新） |
+| `⏳N` | N 个待开始任务 |
 
-**Worktree**：`[feat/branch-name ↓19]`，落后 ≥ 5 时出现在雷达。
+任务行（`tvs-tasks`）中**当前所在项目的任务自动排到最前**，组内再按 进行中 → 停滞 → 待开始 排序。
+
+**Worktree**：`🌿feat/branch-name ↓19`，落后 ≥ 5 时出现在雷达。
 
 ## 配置（`/tvs-hud` 触发）
 
@@ -51,11 +53,11 @@ tvs-tasks    │  * ShireHub发帖页面  │  * 架构重构  │  ! tvs-task�
 | 选项 key | 显示位置 | 默认 | 说明 |
 |----------|----------|------|------|
 | `git` | 项目行 | ✓ | `~N ↑N ↓N` 或 `✓` |
-| `taskCounts` | 项目行 | ✓ | `*N !N ·N` 任务计数 |
+| `taskCounts` | 项目行 | ✓ | `🔥N 💤N ⏳N` 任务计数 |
 | `branchName` | 项目行 | — | 当前分支名（括号内） |
-| `taskLine` | 第三行 | ✓ | 任务标题预览，最多 8 条 |
+| `taskLine` | 第三行 | ✓ | 任务标题预览，最多 8 条（当前项目优先） |
 | `radar` | 第一行 | ✓ | 雷达告警行 |
-| `worktrees` | 项目行末 | ✓ | `[branch git状态]` |
+| `worktrees` | 项目行末 | ✓ | `🌿branch git状态` |
 
 `taskTitleLen`：任务标题截断长度（默认 18 字符）。  
 `taskLineMax`：任务行最多显示条数（默认 8）。
@@ -85,9 +87,9 @@ tvs-tasks    │  * ShireHub发帖页面  │  * 架构重构  │  ! tvs-task�
 | 未提交太久 | dirty + 距上次提交 ≥ 2 天 | `crestrail ~1 未提交3天` |
 | 领先未合并 | ahead ≥ 1 | `shirehub_web ↑28 未合并` |
 | 落后需 rebase | behind ≥ 1 | `main ↓5 需rebase` |
-| stash 积压 | stash ≥ 2 条 | `repo stash×3` |
-| worktree 落后 | worktree behind ≥ 5 | `repo/[feat/cdk] ↓19` |
-| 停滞任务 | 进行中 > 5 天未更新 | `! tvs-task停5天` |
+| stash 积压 | stash ≥ 2 条 | `repo 📦3` |
+| worktree 落后 | worktree behind ≥ 5 | `repo/🌿feat/cdk ↓19` |
+| 停滞任务 | 进行中 > 5 天未更新 | `💤 tvs-task停5天` |
 
 ## statusLine 集成
 

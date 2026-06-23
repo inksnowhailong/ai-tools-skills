@@ -39,7 +39,7 @@ if (hasBoss && projects.length) {
 
 // 任务详情行
 if (cfg.show.has('taskLine') && hasTask) {
-  lines.push(taskLine(allTasks, cfg));
+  lines.push(taskLine(allTasks, cfg, process.cwd()));
 }
 
 if (lines.length) process.stdout.write(lines.join('\n'));

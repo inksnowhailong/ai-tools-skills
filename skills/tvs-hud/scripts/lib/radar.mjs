@@ -52,11 +52,11 @@ export function collectAlerts(projects, allTasks) {
       alerts.push({ text: `${id} ↑${ahead} 未合并`, color: sev(ahead, [1, 20]) });
 
     if (stash >= T.STASH_WARN)
-      alerts.push({ text: `${id} stash×${stash}`, color: sev(stash, [T.STASH_WARN, 5]) });
+      alerts.push({ text: `${id} 📦${stash}`, color: sev(stash, [T.STASH_WARN, 5]) });
 
     for (const wt of worktreesOf(path)) {
       if (wt.behind >= T.WT_BEHIND)
-        alerts.push({ text: `${id}/[${clip(wt.branch, 12)}] ↓${wt.behind}`, color: sev(wt.behind, [T.WT_BEHIND, 20]) });
+        alerts.push({ text: `${id}/🌿${clip(wt.branch, 12)} ↓${wt.behind}`, color: sev(wt.behind, [T.WT_BEHIND, 20]) });
     }
   }
 
@@ -65,7 +65,7 @@ export function collectAlerts(projects, allTasks) {
     if (t.icon !== '◔') continue;
     const days = staleDays(t);
     if (days != null && days >= T.TASK_STALE_DAYS)
-      alerts.push({ text: `! ${clip(t.title, 14)} 停${days}天`, color: sev(days, [T.TASK_STALE_DAYS, 14]) });
+      alerts.push({ text: `💤 ${clip(t.title, 14)} 停${days}天`, color: sev(days, [T.TASK_STALE_DAYS, 14]) });
   }
 
   // 红色优先排序
@@ -82,7 +82,7 @@ export function collectAlerts(projects, allTasks) {
 export function radarLine(alerts) {
   if (!alerts.length) return '';
   const SEP   = `  ${GRAY}·${R}  `;
-  const label = `${DIM}tvs-雷达${R} ${BOLD}${RED}!${alerts.length}${R}`;
+  const label = `${DIM}tvs-雷达${R} 🚨${BOLD}${RED}${alerts.length}${R}`;
   const items = alerts.map(({ text, color }) => `${BOLD}${color}${text}${R}`).join(SEP);
   return label + `  ${GRAY}│${R}  ` + items;
 }
