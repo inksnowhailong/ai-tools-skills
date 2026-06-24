@@ -19,7 +19,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 | 命令 | 作用 |
 |---|---|
 | `detect` | 宿主（claude/cursor）+ 每个 skill 的安装状态 + 孤儿目录 + 第三方生态探测 |
-| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune]` | 安装/更新；默认软链（Windows junction，无需管理员）、默认所有已检测到的宿主 |
+| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主 |
 | `doctor [--fix]` | detect 全部内容 + 死脚本引用扫描 + frontmatter lint + README 同步检查 + HUD 接管链路检查；`--fix` 自动修复漂移拷贝、断链与 HUD 接管 |
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
 
@@ -28,7 +28,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 ### 1. 新机器 / 首次安装（"装一下 tvs"）
 
 1. 跑 `detect`，把 summary 给用户看（哪个宿主、当前状态、第三方生态缺什么）。
-2. 确认目标宿主后跑 `install`（默认软链模式——仓库即真相，改完即生效，无漂移）。
+2. 确认目标宿主后跑 `install`（默认 copy——独立拷贝、永远从远程拉最新、无 clone 常驻依赖/绝对路径泄漏。你自己开发本仓库时加 `--mode link` 改即生效）。
 3. 按下面"生态增强建议"一节处理第三方推荐。
 
 ### 2. 日常体检（"体检一下 / skill 同步了吗"）
@@ -91,7 +91,7 @@ tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路，缺一�
 
 ## 规则
 
-- 默认软链模式；用户明确要求或环境不允许（仓库在临时目录/移动盘）才用 copy。
+- 默认 copy 模式（消费者）；作者本地开发本仓库时用 `--mode link`（改即生效）。install/doctor 会自动拉远程最新，脏仓库自动跳过——所以作者的未提交改动不会被覆盖。
 - `--force` 会覆盖可能含本地修改的漂移拷贝，必须先向用户确认方向。
 - 不要自作主张安装第三方；给出命令与理由，由用户决定。
 - 输出给用户的内容以 summary 为主，JSON 细节按需展开，不要整段贴 JSON。

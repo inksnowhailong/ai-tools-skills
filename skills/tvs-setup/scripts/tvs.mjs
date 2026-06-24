@@ -10,9 +10,15 @@
  *
  * 命令：
  *   node "<skill-path>/scripts/tvs.mjs" detect           检测宿主 / skill 安装状态 / 第三方生态
- *   node "<skill-path>/scripts/tvs.mjs" install [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune]
- *   node "<skill-path>/scripts/tvs.mjs" doctor [--fix]   体检：漂移 / 死引用 / frontmatter / 孤儿 / 断链
+ *   node "<skill-path>/scripts/tvs.mjs" install [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--no-pull]
+ *   node "<skill-path>/scripts/tvs.mjs" doctor [--fix] [--no-pull]   体检：漂移 / 死引用 / frontmatter / 孤儿 / 断链 / HUD 接管
  *   node "<skill-path>/scripts/tvs.mjs" update [--pull]  检查远程是否有新版本；--pull 拉取（仅 ff，脏仓库拒绝）
+ *
+ * 安装模型：
+ *   - install/doctor 开头自动拉取远程最新（ensureLatest）——tvs-setup 永远跑在最新版上；
+ *     仓库有未提交改动时自动跳过（保护作者开发态），无远程/离线时用本地。--no-pull 强制关闭。
+ *   - 默认 copy（消费者：独立拷贝，不依赖 clone 常驻、无绝对路径泄漏）；--mode link 给作者（改即生效）。
+ *     未显式 --mode 时，已是软链的 skill 保持软链，不静默降级。
  *
  * 输出：统一 JSON（stdout），含 summary 数组（人读摘要行）。
  */
@@ -312,6 +318,28 @@ function update(args) {
     return { repo, pulled, summary }
 }
 
+/**
+ * 确保仓库为远程最新——tvs-setup 的核心原则：消费者永远跑在最新版上。
+ * 安全分级：非 git / 无上游 / 离线 → 跳过用本地；有未提交改动 → 跳过并提示（保护作者开发态）；
+ * 干净且落后 → git pull --ff-only。`--no-pull` 可强制关闭。
+ */
+function ensureLatest(args) {
+    if (args['no-pull']) return { skipped: 'disabled', summary: ['（--no-pull：跳过自动拉取远程）'] }
+    const git = (a) => run(`git -C "${REPO_ROOT}" ${a}`)
+    if (git('rev-parse --is-inside-work-tree') !== 'true') return { skipped: 'not-git', summary: [] }
+    const upstream = git('rev-parse --abbrev-ref --symbolic-full-name @{u}')
+    if (!upstream) return { skipped: 'no-upstream', summary: ['⚠️ 仓库无上游分支，跳过自动拉取（用本地版本）'] }
+    if ((git('status --porcelain') || '') !== '') {
+        return { skipped: 'dirty', summary: ['⚠️ 本地有未提交改动，跳过自动拉取以保护你的编辑（作者开发态；消费者一般是干净的）'] }
+    }
+    if (git('fetch --quiet') === null) return { skipped: 'offline', summary: ['⚠️ 远程不可达，使用本地版本'] }
+    const behind = Number.parseInt(git(`rev-list --count HEAD..${upstream}`) ?? '0', 10) || 0
+    if (behind === 0) return { pulled: false, summary: ['✅ 已是远程最新'] }
+    const res = run(`git -C "${REPO_ROOT}" pull --ff-only`)
+    if (res === null) return { pulled: false, behind, summary: [`⚠️ 落后远程 ${behind} 个提交但 pull 失败（可能分叉），用本地版本——请手动处理`] }
+    return { pulled: true, behind, summary: [`✅ 已从远程拉取最新（+${behind} 提交）`] }
+}
+
 // ---------- detect ----------
 
 function detect() {
@@ -372,11 +400,17 @@ function install(args) {
     const H = hosts()
     const targets = (args.target ? args.target.split(',') : Object.keys(H).filter((k) => H[k].exists))
         .filter((t) => H[t])
-    const mode = args.mode || 'link'
+    // 默认 copy：消费者拿到的是不依赖 clone 常驻、无绝对路径泄漏的独立拷贝。
+    // --mode link 给作者本地开发（改即生效）。explicitMode 用于"已软链且没显式指定则保持软链"，
+    // 避免把作者的开发态静默降级成拷贝。
+    const explicitMode = args.mode || null
+    const defaultMode = 'copy'
     const only = args.only ? args.only.split(',') : null
     const repoSkills = listRepoSkills().filter((s) => !only || only.includes(s))
     const actions = []
     const skipped = []
+    // 先确保仓库是远程最新（作者有改动时自动跳过，保护本地编辑）
+    const fresh = ensureLatest(args)
 
     for (const t of targets) {
         const h = H[t]
@@ -385,6 +419,8 @@ function install(args) {
             const src = join(SKILLS_DIR, s)
             const dst = join(h.skillsDir, s)
             const cur = installState(src, dst)
+            // 有效模式：显式 --mode 优先；否则已是软链的保持 link（护作者），其余默认 copy
+            const mode = explicitMode || (cur.state === 'linked' ? 'link' : defaultMode)
             // 已是期望状态则跳过
             if (mode === 'link' && cur.state === 'linked') { skipped.push(`${t}/${s} 已是软链`); continue }
             if (mode === 'copy' && cur.state === 'copy-synced') { skipped.push(`${t}/${s} 拷贝已同步`); continue }
@@ -420,8 +456,8 @@ function install(args) {
         hudActions.push(...r.fixes)
     }
     return {
-        mode, targets, actions, skipped, hudActions,
-        summary: [`安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions],
+        targets, actions, skipped, hudActions, fresh,
+        summary: [...fresh.summary, `安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions],
     }
 }
 
@@ -467,6 +503,7 @@ function checkReadme(repoSkills) {
 }
 
 function doctor(args) {
+    const fresh = ensureLatest(args)
     const det = detect()
     const repoSkills = listRepoSkills()
     const issues = []
@@ -517,11 +554,12 @@ function doctor(args) {
     }
 
     const summary = [
+        ...fresh.summary,
         issues.length === 0 ? '✅ 体检通过，未发现问题' : `发现 ${issues.length} 个问题`,
         ...issues.map((i) => `[${i.kind}] ${i.host ? i.host + '/' : ''}${i.skill}${i.ref ? ' → ' + i.ref : ''}${i.target ? ' → ' + i.target : ''}`),
         ...fixes,
     ]
-    return { issues, fixes, thirdParty: det.thirdParty, repo: det.repo, summary }
+    return { fresh, issues, fixes, thirdParty: det.thirdParty, repo: det.repo, summary }
 }
 
 // ---------- CLI ----------
@@ -563,7 +601,7 @@ function main() {
     else if (cmd === 'doctor') out = doctor(args)
     else if (cmd === 'update') out = update(args)
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|update> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--fix] [--pull]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|update> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--fix] [--pull] [--no-pull]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)

@@ -26,7 +26,9 @@ git clone https://github.com/inksnowhailong/ai-tools-skills.git "$HOME/ai-tools-
 node "$HOME/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs" install
 ```
 
-安装即软链：仓库就是真相，日后 `git pull` 即更新、零漂移。
+默认 **copy 安装**：把 skills 拷进你的全局配置目录，不依赖 clone 常驻、跨机器无绝对路径泄漏。`install` / `doctor` 每次都会**先自动从远程拉最新**——你永远跑在最新版上（仓库有本地改动时自动跳过，保护开发态）。
+
+> 开发本仓库的人：加 `--mode link` 软链安装，改仓库即时生效。
 
 ### 方式二：让 AI 帮你装
 
