@@ -20,7 +20,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 |---|---|
 | `detect` | 宿主（claude/cursor）+ 每个 skill 的安装状态 + 孤儿目录 + 第三方生态探测 |
 | `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune]` | 安装/更新；默认软链（Windows junction，无需管理员）、默认所有已检测到的宿主 |
-| `doctor [--fix]` | detect 全部内容 + 死脚本引用扫描 + frontmatter lint + README 同步检查；`--fix` 自动修复漂移拷贝与断链 |
+| `doctor [--fix]` | detect 全部内容 + 死脚本引用扫描 + frontmatter lint + README 同步检查 + HUD 接管链路检查；`--fix` 自动修复漂移拷贝、断链与 HUD 接管 |
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
 
 ## 四种使用场景
@@ -38,7 +38,8 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
    - `dead-script-ref` / `frontmatter-*` / `readme-missing-skill`：仓库本身的质量问题，需要修仓库文件，脚本不自动修。
    - `orphan`：仓库已删但本机还在的 tvs- 目录，确认后用 `install --prune` 清除。
    - `broken-link` / `linked-elsewhere`：链接失效或指向别处（仓库被移动过），`--fix` 重建或重新 install。
-2. 修复类动作（`--fix` / `--prune` / `--force`）**先告知用户影响再执行**。
+   - `hud-bridge-not-installed` / `hud-bridge-drift` / `statusline-not-wired` / `statusline-missing-omc-hud-flag`：状态栏 HUD 接管链路断裂（详见下节），`--fix` 自动修复。`hud-bridge-missing-in-repo` 是仓库缺源文件，脚本不自动修，需补回 `skills/tvs-hud/hud/combined-status.mjs`。
+2. 修复类动作（`--fix` / `--prune` / `--force`）**先告知用户影响再执行**。`--fix` 修 HUD 会改写 `~/.claude/settings.json` 的 `statusLine.command`（仅这一个键，其余保序不动），执行前提示用户。
 
 ### 3. 版本更新（"有新版吗 / 更新一下"，或 detect/doctor 报 repo-outdated 时）
 
@@ -63,6 +64,21 @@ tvs 专注差异化：任务账本、字符画分析、个人代码观、思维�
 
 - 缺失时把 `hint` 命令和 `why` 一句话给用户，**征得同意后可以代跑安装命令**；用户拒绝不影响 tvs 任何功能（所有 tvs skill 都有降级路径）。
 - 全部就绪时一句话确认即可，不要重复推销。
+
+## HUD 状态栏接管（tvs-hud 依赖链路）
+
+tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路，缺一不可：
+
+```text
+1. ~/.claude/hud/combined-status.mjs   桥接文件（仓库 skills/tvs-hud/hud/ 为源，部署到此处）
+2. settings.json → statusLine.command  指向该桥接文件
+3. 命令末尾 --omc-hud                   让 OMC 自检 includes("omc-hud") 通过，否则 OMC HUD 退化成诊断文字
+```
+
+- `detect` / `doctor` 会输出 `HUD 接管(claude)` 状态行；断裂时报对应 issue。
+- `doctor --fix`：把仓库的 combined-status.mjs 拷到 `~/.claude/hud/`（始终拷贝、独立于 skill 软链，卸载 tvs-hud 不会让状态栏报错），并改写 statusLine 指向它、补 `--omc-hud`（沿用现有 node 路径，仅当首 token 像 node 时；否则回退当前 node）。
+- `install` 装了 tvs-hud 且目标含 claude 时，自动执行同样的接管。
+- **复发点**：跑 `/oh-my-claudecode:hud setup` 会把 statusLine 改回纯 omc，tvs 三行随之消失——再 `doctor --fix` 即可恢复。
 
 ## 与 tvs-cc-migrator 的边界
 

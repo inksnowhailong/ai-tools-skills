@@ -19,7 +19,7 @@
 
 import { execSync } from 'node:child_process'
 import {
-    existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
+    existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync,
     readlinkSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, cpSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
@@ -154,6 +154,109 @@ function detectThirdParty() {
     }
 }
 
+// ---------- HUD 接管（仅 claude 宿主）----------
+//
+// tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路：
+//   1. ~/.claude/hud/combined-status.mjs 桥接文件存在（由仓库部署）
+//   2. settings.json → statusLine.command 指向该桥接文件
+//   3. 命令末尾带 --omc-hud（让 OMC 自检 includes("omc-hud") 通过，否则 OMC HUD 退化成诊断文字）
+// 任一断裂，tvs 三行不显示或 OMC HUD 异常。/oh-my-claudecode:hud setup 会把 statusLine 改回纯 omc，复发本问题。
+
+const HUD_BRIDGE = 'combined-status.mjs'
+const repoHudBridge = () => join(SKILLS_DIR, 'tvs-hud', 'hud', HUD_BRIDGE)
+const installedHudBridge = () => join(homedir(), '.claude', 'hud', HUD_BRIDGE)
+const settingsPath = () => join(homedir(), '.claude', 'settings.json')
+
+/** 检测 HUD 接管链路三点状态；claude 宿主缺失时返回 skipped */
+function checkHud() {
+    if (!existsSync(join(homedir(), '.claude'))) return { skipped: true }
+    const repoBridge = repoHudBridge()
+    const instBridge = installedHudBridge()
+    const r = {
+        repoBridgePresent: existsSync(repoBridge),
+        bridgeInstalled: existsSync(instBridge),
+        bridgeSynced: false,
+        statusLineWired: false,
+        omcHudFlag: false,
+        command: null,
+        issues: [],
+    }
+    if (r.repoBridgePresent && r.bridgeInstalled) {
+        r.bridgeSynced = readFileSync(repoBridge, 'utf8') === readFileSync(instBridge, 'utf8')
+    }
+    const sp = settingsPath()
+    if (existsSync(sp)) {
+        try {
+            const cmd = JSON.parse(readFileSync(sp, 'utf8'))?.statusLine?.command ?? null
+            r.command = cmd
+            if (cmd) {
+                r.statusLineWired = cmd.includes(HUD_BRIDGE)
+                r.omcHudFlag = cmd.includes('--omc-hud')
+            }
+        } catch { /* settings.json 解析失败，下面 issue 兜底 */ }
+    }
+    // 仓库没有桥接源 → 质量问题，脚本不自动修
+    if (!r.repoBridgePresent) { r.issues.push('hud-bridge-missing-in-repo'); return r }
+    if (!r.bridgeInstalled) r.issues.push('hud-bridge-not-installed')
+    else if (!r.bridgeSynced) r.issues.push('hud-bridge-drift')
+    if (!r.statusLineWired) r.issues.push('statusline-not-wired')
+    else if (!r.omcHudFlag) r.issues.push('statusline-missing-omc-hud-flag')
+    return r
+}
+
+/** 一句话状态标签 */
+function hudLabel(hud) {
+    if (hud.skipped) return '未检测到 claude 宿主（跳过）'
+    if (hud.issues.length === 0) return '✅ 已接管（combined-status + --omc-hud）'
+    return '⚠️ ' + hud.issues.join(', ')
+}
+
+/** 部署桥接文件 仓库 → ~/.claude/hud/（始终拷贝，独立于 skill 软链，卸载 tvs-hud 不影响状态栏） */
+function deployHudBridge() {
+    const repoBridge = repoHudBridge()
+    if (!existsSync(repoBridge)) return { ok: false, reason: '仓库缺少 hud/combined-status.mjs 源文件' }
+    const dest = installedHudBridge()
+    mkdirSync(dirname(dest), { recursive: true })
+    cpSync(repoBridge, dest)
+    return { ok: true, dest: norm(dest) }
+}
+
+/** 改写 settings.json：仅触碰 statusLine.command 一个键，其余原样保序回写，不备份 */
+function wireStatusLine() {
+    const sp = settingsPath()
+    let cfg = {}
+    if (existsSync(sp)) {
+        try { cfg = JSON.parse(readFileSync(sp, 'utf8')) }
+        catch (e) { return { ok: false, reason: `settings.json 解析失败（${e.message}），拒绝改写以免破坏配置` } }
+    }
+    const bridge = norm(installedHudBridge())
+    // 沿用现有命令里的 node 可执行（首 token）——仅当它确实像 node 时；否则回退当前 node，
+    // 避免把非 node 的首 token（脏数据/其他命令）误当解释器传下去。
+    const firstTok = cfg.statusLine?.command?.match(/^("[^"]+"|\S+)/)?.[1] || ''
+    const looksLikeNode = /node(\.exe)?"?$/i.test(firstTok)
+    const nodeExe = looksLikeNode ? firstTok : `"${process.execPath}"`
+    const newCmd = `${nodeExe} "${bridge}" --omc-hud`
+    if (!cfg.statusLine) cfg.statusLine = { type: 'command' }
+    if (cfg.statusLine.command === newCmd) return { ok: true, changed: false, command: newCmd }
+    cfg.statusLine.type = cfg.statusLine.type || 'command'
+    cfg.statusLine.command = newCmd
+    writeFileSync(sp, JSON.stringify(cfg, null, 2) + '\n')
+    return { ok: true, changed: true, command: newCmd }
+}
+
+/** 修复 HUD 链路：部署桥接 + 接管 statusLine。返回动作摘要数组 */
+function fixHud() {
+    const fixes = []
+    const d = deployHudBridge()
+    if (!d.ok) return { fixes: [`❌ HUD 桥接部署失败：${d.reason}`], ok: false }
+    fixes.push(`已部署桥接文件 → ${d.dest}`)
+    const w = wireStatusLine()
+    if (!w.ok) { fixes.push(`❌ statusLine 接管失败：${w.reason}`); return { fixes, ok: false } }
+    fixes.push(w.changed ? `已接管 statusLine.command → ${HUD_BRIDGE} --omc-hud` : 'statusLine 已是期望值，无需改动')
+    fixes.push('提示：状态栏下次刷新生效；若日后跑了 /oh-my-claudecode:hud setup 被改回，再 doctor --fix 即可')
+    return { fixes, ok: true }
+}
+
 // ---------- 仓库版本检查 ----------
 
 /** 仓库相对远程上游的版本状态；doFetch 时先 fetch，网络不可用则降级为本地缓存比较 */
@@ -236,6 +339,7 @@ function detect() {
     }
 
     const thirdParty = detectThirdParty()
+    const hud = checkHud()
     const repo = repoStatus(true)
     const summary = []
     for (const [hostName, h] of Object.entries(H)) {
@@ -252,13 +356,14 @@ function detect() {
         if (k === 'node') continue
         summary.push(`${k}: ${v.installed ? '✅ 已就绪' : '⬜ 未安装（可增强）'}`)
     }
+    summary.push(`HUD 接管(claude): ${hudLabel(hud)}`)
     if (repo.isGitRepo) {
         if (repo.note) summary.push(`仓库版本: ⚠️ ${repo.note}`)
         else if (repo.behind > 0) summary.push(`仓库版本: ⬆️ 落后远程 ${repo.behind} 个提交（用户确认后可 update --pull 更新）`)
         else summary.push('仓库版本: ✅ 已是最新' + (repo.fetchOk === false ? '（远程不可达，本地缓存比较）' : ''))
     }
 
-    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, repo, summary }
+    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, repo, summary }
 }
 
 // ---------- install ----------
@@ -308,7 +413,16 @@ function install(args) {
             }
         }
     }
-    return { mode, targets, actions, skipped, summary: [`安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped] }
+    // 装了 tvs-hud 且目标含 claude → 自动接管状态栏（部署桥接 + 改 statusLine），否则 tvs-hud 装了也不显示
+    const hudActions = []
+    if (targets.includes('claude') && repoSkills.includes('tvs-hud')) {
+        const r = fixHud()
+        hudActions.push(...r.fixes)
+    }
+    return {
+        mode, targets, actions, skipped, hudActions,
+        summary: [`安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions],
+    }
 }
 
 // ---------- doctor ----------
@@ -386,6 +500,17 @@ function doctor(args) {
     issues.push(...checkReadme(repoSkills))
     for (const [hostName, list] of Object.entries(det.orphans)) {
         for (const o of list) issues.push({ kind: 'orphan', skill: o, host: hostName, hint: 'install --prune 可清除' })
+    }
+    // HUD 接管链路（仅 claude）
+    if (!det.hud?.skipped && det.hud?.issues?.length) {
+        for (const k of det.hud.issues) {
+            issues.push({ kind: k, skill: 'HUD 状态栏接管', host: 'claude',
+                hint: k === 'hud-bridge-missing-in-repo' ? '仓库缺 skills/tvs-hud/hud/combined-status.mjs，需补回源文件（脚本不自动修）' : 'doctor --fix 自动修复' })
+        }
+        // 仓库有源 才能 --fix（missing-in-repo 是质量问题，跳过自动修）
+        if (args.fix && det.hud.repoBridgePresent) {
+            fixes.push(...fixHud().fixes)
+        }
     }
     if (det.repo?.behind > 0) {
         issues.push({ kind: 'repo-outdated', skill: `落后远程 ${det.repo.behind} 个提交`, hint: '展示新提交给用户，确认后 update --pull' })
