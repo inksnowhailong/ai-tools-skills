@@ -35,8 +35,9 @@ disable-model-invocation: true
 node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 ```
 
-- 往 `<团队根>/.tvs-boss/` 写 `panel.cmd`（Windows）和 `panel.command`（mac）；已存在直接覆盖（内容由当前 `$SKILL` 路径决定，覆盖即随 skill 安装位置刷新，幂等）。
-- 启动器自定位团队根、panel.mjs 路径生成时填入，零硬编码盘符——这就是它必须"按团队生成"而非塞进 skill 源码的原因。
+- 往 `<团队根>/.tvs-boss/` 写 `panel.cmd`（Windows）和 `panel.command`（mac）；已存在直接覆盖，幂等。
+- 启动器是「薄壳」，**运行时**自定位两样：团队根（`%~dp0` / `$(dirname)`）+ 本机 skill 里的 `open-panel.mjs`（探 `~/.claude` → `~/.cursor`）。**零绝对路径**——所以团队目录同步给别人、换台机器（只要对方本机也装了 tvs-boss）双击即用，不会再出现指向生成机路径的"缺少 js 文件"。
+- 必须"按团队生成"而非塞进 skill 源码的原因：启动器是运行态产物，落在团队数据 `.tvs-boss/` 里、每个团队根各异。
 - 告诉用户："面板启动器已就位，双击 `<团队根>\.tvs-boss\panel.cmd`（mac 为 `panel.command`）即可开看板。"
 
 ### 5. 成为 leader
