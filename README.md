@@ -10,6 +10,19 @@
 > ⚠️ 关键：软链安装要求**仓库常驻在一个固定位置**。请把仓库克隆到 `~/ai-tools-skills`（家目录下），
 > **不要放临时目录或某个项目目录里**——否则该目录一删/一换，安装出的软链就全断（会看到指向别人机器的怪路径）。
 
+### 方式零：Claude Code 插件（CC 用户首选）
+
+Claude Code 用户直接走原生插件，无需 clone/node，安装后自动更新：
+
+```text
+/plugin marketplace add inksnowhailong/ai-tools-skills
+/plugin install tvs-inksnow@tvs
+```
+
+装完重启会话即可用全部 skill。Cursor/Codex/Cline 用户走下面的方式一/二。
+
+> 注意：`tvs-hud` 状态栏需额外一步——插件只把脚本带到位，**接管状态栏仍需运行 `/tvs-hud`**（Claude Code 插件不能直接改用户 `statusLine` 设置，这是平台限制）。
+
 ### 方式一：直接命令（推荐，结果确定）
 
 需要 `git` 和 `node`。复制粘贴即可：
@@ -191,6 +204,8 @@ node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs doctor
 # 更新
 node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs update --pull
 ```
+
+> 发布维护者注意：`.claude-plugin/plugin.json` 与 `.claude-plugin/marketplace.json` 的 `version`（marketplace 有两处）必须同步 bump，CC 插件渠道靠它判断更新。
 
 ---
 

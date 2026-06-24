@@ -39,6 +39,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
    - `orphan`：仓库已删但本机还在的 tvs- 目录，确认后用 `install --prune` 清除。
    - `broken-link` / `linked-elsewhere`：链接失效或指向别处（仓库被移动过），`--fix` 重建或重新 install。
    - `hud-bridge-not-installed` / `hud-bridge-drift` / `statusline-not-wired` / `statusline-missing-omc-hud-flag`：状态栏 HUD 接管链路断裂（详见下节），`--fix` 自动修复。`hud-bridge-missing-in-repo` 是仓库缺源文件，脚本不自动修，需补回 `skills/tvs-hud/hud/combined-status.mjs`。
+   - `claude-dup-with-plugin`：CC 已装 `tvs-inksnow` 插件，且 tvs-setup 又往 `~/.claude/skills` 装过本仓库 skill → 重复。CC 建议交给插件：手动删 `~/.claude/skills/tvs-*`，或之后只 `install --target cursor`（脚本不自动删 claude skills，避免误伤用户自有内容）。
 2. 修复类动作（`--fix` / `--prune` / `--force`）**先告知用户影响再执行**。`--fix` 修 HUD 会改写 `~/.claude/settings.json` 的 `statusLine.command`（仅这一个键，其余保序不动），执行前提示用户。
 
 ### 3. 版本更新（"有新版吗 / 更新一下"，或 detect/doctor 报 repo-outdated 时）
