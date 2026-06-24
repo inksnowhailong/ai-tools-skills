@@ -16,10 +16,12 @@ Claude Code 用户直接走原生插件，无需 clone/node，安装后自动更
 
 ```text
 /plugin marketplace add inksnowhailong/ai-tools-skills
-/plugin install tvs-inksnow@tvs
+/plugin install tvs-inksnow@tvs-inksnow
 ```
 
 装完重启会话即可用全部 skill。Cursor/Codex/Cline 用户走下面的方式一/二。
+
+> 命名说明：`add` 后面 `inksnowhailong/ai-tools-skills` 是 **GitHub 仓库坐标**（CC 去这里 clone）；`install` 的 `tvs-inksnow@tvs-inksnow` 是 **插件名@市场名**——本插件这两者都叫 `tvs-inksnow`，所以 `@` 前后一样。三者分属仓库/插件/市场不同命名系统，仓库名与它们不同是正常的。
 
 > 注意：`tvs-hud` 状态栏需额外一步——插件只把脚本带到位，**接管状态栏仍需运行 `/tvs-hud`**（Claude Code 插件不能直接改用户 `statusLine` 设置，这是平台限制）。
 

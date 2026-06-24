@@ -15,7 +15,7 @@
 1. **工具范围**：双轨。CC 走原生插件；其余工具仍由 tvs-setup 服务。
 2. **tvs-setup 与 CC**：tvs-setup 仍可装 CC（作降级/备选），但必须加**插件已装检测**防重复。
 3. **深度**：仅插件打包（增量）。不做 npm CLI、CLAUDE.md 注入、版本横幅、compact-shim。
-4. **开放项按最稳取值**：marketplace id `tvs`；plugin name `tvs-inksnow`（安装即 `tvs-inksnow@tvs`）；tvs-setup 保留在插件 skill 列表中但加运行守卫；HUD statusLine 限制文档化。
+4. **开放项按最稳取值**：marketplace name 与 plugin name 均为 `tvs-inksnow`（安装即 `tvs-inksnow@tvs-inksnow`，@ 前后一致）；tvs-setup 保留在插件 skill 列表中但加运行守卫；HUD statusLine 限制文档化。
 
 ## 核心原则：单一真源，增量添加
 
@@ -43,7 +43,7 @@ ai-tools-skills/
 ```json
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "tvs",
+  "name": "tvs-inksnow",
   "description": "inksnow 个人 AI 助手配置库：任务账本、多项目团队、架构访谈、状态栏 HUD、记忆工程等 15 个 skill",
   "owner": { "name": "inksnowhailong" },
   "plugins": [
@@ -114,7 +114,7 @@ CC 调用 skill 时告知模型 "Base directory for this skill: `<plugin>/skills
 
 CC 上若插件与 tvs-setup 双装，会出现同名 skill 两份。
 
-- **检测**：查 `~/.claude/plugins/installed_plugins.json` 是否含 `tvs-inksnow@tvs`（或 cache 目录存在 `plugins/cache/tvs/tvs-inksnow/`）。
+- **检测**：查 `~/.claude/plugins/installed_plugins.json` 是否含 `tvs-inksnow@tvs-inksnow`（或 cache 目录存在 `plugins/cache/tvs-inksnow/tvs-inksnow/`）。
 - **detect/doctor**：插件已装 + tvs-setup 又往 `~/.claude/skills` 装过 tvs-* → 报 `claude-dup-with-plugin`，建议移除 tvs-setup 的 claude 拷贝（CC 交给插件）。
 - **install**：target 含 `claude` 且检测到插件 → 默认警告并跳过 claude（`--force` 仍可强装）。
 
@@ -135,7 +135,7 @@ CC 上若插件与 tvs-setup 双装，会出现同名 skill 两份。
 
 | 渠道 | 安装 | 更新 |
 |---|---|---|
-| Claude Code | `/plugin marketplace add inksnowhailong/ai-tools-skills` → `/plugin install tvs-inksnow@tvs` | marketplace autoUpdate（原生，无需 clone/pull） |
+| Claude Code | `/plugin marketplace add inksnowhailong/ai-tools-skills` → `/plugin install tvs-inksnow@tvs-inksnow` | marketplace autoUpdate（原生，无需 clone/pull） |
 | Cursor/Codex/Cline | `git clone … ~/ai-tools-skills` + `node …/tvs.mjs install` | `tvs.mjs install/doctor` 自动 always-pull |
 
 ## 风险与缓解
