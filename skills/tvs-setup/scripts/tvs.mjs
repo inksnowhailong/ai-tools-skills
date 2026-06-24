@@ -369,6 +369,10 @@ function detect() {
     const thirdParty = detectThirdParty()
     const hud = checkHud()
     const repo = repoStatus(true)
+    // CC 插件已装且 tvs-setup 又往 ~/.claude/skills 装过本仓库 skill → 重复
+    const INSTALLED_STATES = ['linked', 'copy-synced', 'copy-drift']
+    const pluginDup = pluginInstalled('tvs-inksnow')
+        && repoSkills.some((s) => INSTALLED_STATES.includes(skills[s].claude?.state))
     const summary = []
     for (const [hostName, h] of Object.entries(H)) {
         if (!h.exists) { summary.push(`宿主 ${hostName}: 未检测到（跳过）`); continue }
@@ -385,13 +389,14 @@ function detect() {
         summary.push(`${k}: ${v.installed ? '✅ 已就绪' : '⬜ 未安装（可增强）'}`)
     }
     summary.push(`HUD 接管(claude): ${hudLabel(hud)}`)
+    if (pluginDup) summary.push('⚠️ 重复：CC 插件 tvs-inksnow 已装，且 tvs-setup 也往 ~/.claude/skills 装过——CC 建议交给插件，移除 tvs-setup 的 claude 安装')
     if (repo.isGitRepo) {
         if (repo.note) summary.push(`仓库版本: ⚠️ ${repo.note}`)
         else if (repo.behind > 0) summary.push(`仓库版本: ⬆️ 落后远程 ${repo.behind} 个提交（用户确认后可 update --pull 更新）`)
         else summary.push('仓库版本: ✅ 已是最新' + (repo.fetchOk === false ? '（远程不可达，本地缓存比较）' : ''))
     }
 
-    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, repo, summary }
+    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, pluginDup, repo, summary }
 }
 
 // ---------- install ----------
@@ -412,7 +417,12 @@ function install(args) {
     // 先确保仓库是远程最新（作者有改动时自动跳过，保护本地编辑）
     const fresh = ensureLatest(args)
 
-    for (const t of targets) {
+    // CC 已装插件时，默认不再用 tvs-setup 装 claude（防重复）；--force 可强装
+    let targetsEffective = targets
+    const skippedClaudeForPlugin = targets.includes('claude') && pluginInstalled('tvs-inksnow') && !args.force
+    if (skippedClaudeForPlugin) targetsEffective = targets.filter((t) => t !== 'claude')
+
+    for (const t of targetsEffective) {
         const h = H[t]
         mkdirSync(h.skillsDir, { recursive: true })
         for (const s of repoSkills) {
@@ -451,13 +461,17 @@ function install(args) {
     }
     // 装了 tvs-hud 且目标含 claude → 自动接管状态栏（部署桥接 + 改 statusLine），否则 tvs-hud 装了也不显示
     const hudActions = []
-    if (targets.includes('claude') && repoSkills.includes('tvs-hud')) {
+    if (targetsEffective.includes('claude') && repoSkills.includes('tvs-hud')) {
         const r = fixHud()
         hudActions.push(...r.fixes)
     }
     return {
         targets, actions, skipped, hudActions, fresh,
-        summary: [...fresh.summary, `安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions],
+        summary: [
+            ...fresh.summary,
+            ...(skippedClaudeForPlugin ? ['⚠️ 检测到 CC 已装 tvs-inksnow 插件，已跳过 claude（用 --force 可强装）；CC 请用 /plugin 管理'] : []),
+            `安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions,
+        ],
     }
 }
 
@@ -537,6 +551,10 @@ function doctor(args) {
     issues.push(...checkReadme(repoSkills))
     for (const [hostName, list] of Object.entries(det.orphans)) {
         for (const o of list) issues.push({ kind: 'orphan', skill: o, host: hostName, hint: 'install --prune 可清除' })
+    }
+    if (det.pluginDup) {
+        issues.push({ kind: 'claude-dup-with-plugin', skill: 'Claude Code 重复安装', host: 'claude',
+            hint: 'CC 已装 tvs-inksnow 插件；手动删 ~/.claude/skills/tvs-* 或 install --target cursor 只装其他工具。脚本不自动删 claude skills（避免误伤）' })
     }
     // HUD 接管链路（仅 claude）
     if (!det.hud?.skipped && det.hud?.issues?.length) {
