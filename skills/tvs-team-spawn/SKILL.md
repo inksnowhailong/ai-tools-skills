@@ -337,24 +337,30 @@ node "<skill-path>/scripts/team.mjs" generate-stop-hook --workspace "<workspace>
 
 ### 阶段 5 — 更新 .gitignore
 
-`.team/` 里都是运行时状态（邮箱内容、watcher pid、记忆），不应入库。按 target 把对应两行写入项目根的 `.gitignore`（如果已存在则跳过）：
+`.team/` 里都是运行时状态（邮箱内容、watcher pid、记忆），不应入库。**生成的 leader/sub SKILL.md 也不应入库**——它们内嵌了 `team.mjs` 的本机绝对安装路径（`node "<本机>/skills/tvs-team-spawn/scripts/team.mjs" ...`），换台机器/同步给队友后该路径不存在，会报"找不到 team.mjs"。这些是**机器本地脚手架**，每个人在自己机器上跑一次本 skill 各自生成即可。
+
+按 target 把对应行写入项目根的 `.gitignore`（已存在则跳过）。其中生成的 skill 目录名取自实际的 leader/sub 名（`team-leader-<队名>` 与各 sub 名）：
 
 ```text
 # cursor target
 .cursor/.team/
 .cursor/hooks/team-stop-driver.mjs
+.cursor/skills/team-leader-<队名>/
+.cursor/skills/<每个 sub 名>/
 
 # claude target
 .claude/.team/
 .claude/hooks/team-stop-driver.mjs
+.claude/skills/team-leader-<队名>/
+.claude/skills/<每个 sub 名>/
 
 # codegraph 本地索引（机器本地状态，与 target 无关）
 .codegraph/
 ```
 
-`team-stop-driver.mjs` 是生成产物，跟随 hook 注册文件即可（`.cursor/hooks.json` / `.claude/settings.json` 可入库让团队共享 hook 注册，stop-driver 内容由本 skill 在新机器上重新生成）。
+`team-stop-driver.mjs` 与生成的 leader/sub SKILL.md 都是**机器本地生成产物**：hook 注册（`.cursor/hooks.json` / `.claude/settings.json`）可入库让团队共享，但产物内容由本 skill 在每台新机器上重新生成。
 
-如果你判断用户希望把 stop-driver 也提交（团队共享），不要写进 .gitignore，只忽略 `.team/` 那一行。
+**共享的是协作数据，不是脚手架**：队友之间真正要同步的是 `.team/`（若想共享黑板/约定可单独入库）和 hook 注册；leader/sub 的 SKILL.md、stop-driver.mjs 一律各机重生成。如果用户坚持要把这些产物提交团队共享，必须先解决 `team.mjs` 路径在各机一致的问题（否则换机即坏），默认不建议。
 
 ### 阶段 6 — 引导后续手动步骤
 
