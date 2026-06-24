@@ -588,6 +588,16 @@ function parseArgs(argv) {
 function main() {
     const args = parseArgs(process.argv.slice(2))
     const cmd = args._[0]
+    // 插件缓存守卫：tvs-setup 被从 Claude Code 插件目录内误跑时，引导用 /plugin 而非本脚本。
+    // 仅拦截会改动文件的命令（install/update）；detect/doctor 只读，放行以便诊断。
+    const inPluginCache = !!process.env.CLAUDE_PLUGIN_ROOT
+        || /[\\/]plugins[\\/](cache|marketplaces)[\\/]/.test(SCRIPT_DIR)
+    if (inPluginCache && (cmd === 'install' || cmd === 'update')) {
+        process.stdout.write(JSON.stringify({
+            error: '检测到 tvs-setup 正从 Claude Code 插件内运行。Claude Code 请用 /plugin 管理本插件（install/update/uninstall）；tvs-setup 仅用于 Cursor/Codex/Cline，或从你自己克隆的仓库（如 ~/ai-tools-skills）运行。',
+        }, null, 2) + '\n')
+        process.exit(1)
+    }
     // 拷贝安装的 skill 里跑本脚本时无法定位仓库（软链安装无此问题：Node 自动解析真实路径）
     if (!existsSync(SKILLS_DIR)) {
         process.stdout.write(JSON.stringify({
