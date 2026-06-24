@@ -7,20 +7,44 @@
 
 ## 安装
 
-把下面这段话直接发给当前 AI 助手：
+> ⚠️ 关键：软链安装要求**仓库常驻在一个固定位置**。请把仓库克隆到 `~/ai-tools-skills`（家目录下），
+> **不要放临时目录或某个项目目录里**——否则该目录一删/一换，安装出的软链就全断（会看到指向别人机器的怪路径）。
+
+### 方式一：直接命令（推荐，结果确定）
+
+需要 `git` 和 `node`。复制粘贴即可：
+
+```bash
+# macOS / Linux / Git Bash
+git clone https://github.com/inksnowhailong/ai-tools-skills.git ~/ai-tools-skills
+node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
+```
+
+```powershell
+# Windows PowerShell
+git clone https://github.com/inksnowhailong/ai-tools-skills.git "$HOME/ai-tools-skills"
+node "$HOME/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs" install
+```
+
+安装即软链：仓库就是真相，日后 `git pull` 即更新、零漂移。
+
+### 方式二：让 AI 帮你装
+
+把下面这段**原样**发给当前 AI 助手（它已包含固定克隆位置，不要让 AI 自行决定克隆到哪）：
 
 ```
-请把这个仓库安装到你当前 AI 工具的用户级全局配置目录，并自动适配目录结构：
+请按以下步骤把这个仓库装到我当前 AI 工具的用户级全局配置目录，全程不要改动当前项目目录：
 
-https://github.com/inksnowhailong/ai-tools-skills.git
-
-要求：
-1. 先识别你自己是 Claude Code、Cursor、Codex、Cline 还是其他 AI 工具。
-2. Claude Code / Cursor 优先运行仓库自带脚本：node <repo>/skills/tvs-setup/scripts/tvs.mjs install
-3. 其他工具：拉取仓库后只把内容安装到用户全局目录，不要写入当前项目目录；
-   工具不支持的能力转成它能读取的规则/命令文档，并说明。
-4. 覆盖前先备份用户已有同名文件。
-5. 完成后报告安装目录、安装了哪些 skill / rule，以及哪些内容因工具不支持被跳过。
+1. 先把仓库克隆到固定位置 ~/ai-tools-skills（务必是这个家目录路径，不要放临时目录或当前项目里——
+   软链安装要求仓库常驻）：
+   git clone https://github.com/inksnowhailong/ai-tools-skills.git ~/ai-tools-skills
+   （若该目录已存在且是本仓库，跳过克隆，直接 git -C ~/ai-tools-skills pull --ff-only）
+2. 识别你自己是 Claude Code / Cursor / Codex / Cline 还是其他工具。
+3. Claude Code / Cursor：直接运行安装脚本（它会把 skills 软链到你的用户级配置目录，不要手动拷贝文件）：
+   node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
+4. 其他工具：把 ~/ai-tools-skills 里的 skills / rules 安装到你的用户全局目录（不是项目目录）；
+   你不支持的能力转成你能读取的规则/命令文档，并说明。
+5. 覆盖前先备份同名文件。完成后报告：仓库克隆到了哪、装了哪些 skill / rule、哪些因工具不支持被跳过。
 ```
 
 安装完成后，说 **"tvs setup / 体检一下"** 即可由 `tvs-setup` 接管日常维护与更新。
@@ -155,15 +179,15 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 ## 手动安装 / 升级
 
 ```bash
-# 克隆并安装（软链，仓库即真相）
-git clone https://github.com/inksnowhailong/ai-tools-skills.git
-node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
+# 克隆到固定位置并安装（软链，仓库即真相）
+git clone https://github.com/inksnowhailong/ai-tools-skills.git ~/ai-tools-skills
+node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install
 
-# 体检
-node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs doctor
+# 体检（含 HUD 接管链路检查）
+node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs doctor
 
 # 更新
-node ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs update --pull
+node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs update --pull
 ```
 
 ---

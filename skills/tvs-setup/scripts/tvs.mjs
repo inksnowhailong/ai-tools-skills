@@ -553,7 +553,7 @@ function main() {
     // 拷贝安装的 skill 里跑本脚本时无法定位仓库（软链安装无此问题：Node 自动解析真实路径）
     if (!existsSync(SKILLS_DIR)) {
         process.stdout.write(JSON.stringify({
-            error: `无法定位 AIConfig 仓库（期望 ${norm(SKILLS_DIR)} 存在）。本脚本可能在"拷贝安装"的目录里运行——请到仓库目录内执行，或用软链方式重新安装 tvs-setup。`,
+            error: `无法定位 AIConfig 仓库（期望 ${norm(SKILLS_DIR)} 存在）。本脚本被从一个脱离仓库的位置运行了（例如把单个 skill 文件拷进了 ~/.claude）。正确做法：先把整个仓库克隆到固定位置再从那里运行——\n  git clone https://github.com/inksnowhailong/ai-tools-skills.git ~/ai-tools-skills\n  node ~/ai-tools-skills/skills/tvs-setup/scripts/tvs.mjs install`,
         }, null, 2) + '\n')
         process.exit(1)
     }
