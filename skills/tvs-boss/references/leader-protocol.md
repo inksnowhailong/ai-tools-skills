@@ -130,18 +130,26 @@
 - **不违背"记忆有界"铁律**：原生 Task 是 **harness 维护的活列表**、可随时由 git 现状重推（第六节），不是手写易过期的 md，也不落进 `.tvs-boss/` 记忆。**不要**再为此恢复 `live-agents.json` 或加面板运行态屏。
 - 没有 Task 工具的环境（如部分 IDE）：降级为口述进度（第五节扫 git），功能不受影响。
 
-## 九、项目记忆 + codegraph 协同（派活时按需注入，能用就用、不强读）
+## 九、队员上下文靠"自动加载"，不靠 leader 注入（省 token/省速度）
 
-很多项目各自部署了**记忆工程（`.memory/`）**和**结构图谱（codegraph）**。派 dev/角色进某项目前，leader 先探测它装了哪些，再把"按需使用"提示注入队员上下文。
+**关键事实（已实测）**：leader 用 `Agent` 工具 spawn 的队员，会自动加载**用户级 + cwd 目录链上的 `CLAUDE.md`**——和主会话同等待遇。所以**凡是该让队员知道的，放进它会自动加载的 `CLAUDE.md` 即可，不要靠 leader 每次往 prompt 里塞**（注入既费 token 又拖慢，还依赖 leader 自觉，脆）。
 
-**核心原则：有就让队员会用、按需用；不需要就别为读而读；缺了自动降级（grep/read），不阻塞。**
+### 9.1 项目级（codegraph / 记忆 / 项目约定）——已经自动，无需 leader 操心
 
-**探测（一眼可判，零成本）：**
-- 项目根有 `.memory/` → 该项目有记忆工程。
-- 项目根有 `.codegraph/`（或 `codegraph_status` 能返回）→ 有结构图谱。
+dev 在某项目目录干活时，会自动加载该项目的 `CLAUDE.md`，而：
+- **codegraph 指令**由 codegraph 官方安装器写在项目 `CLAUDE.md` → 队员自动拿到"结构问题优先用 `codegraph_*`"。
+- **记忆宪法**由 tvs-init-memory-system 追加在项目 `CLAUDE.md` → 队员自动拿到"需要业务语义时按 `.memory/记忆索引.md` 查、不需要不强读"。
+- **项目架构约定**（tvs-inksnow-arch 写的）同理自动到。
 
-**注入给队员的话（按探测结果拼，没探测到的就不提）：**
-- **codegraph**：遇到结构问题——"X 在哪定义 / 谁调用 X / 改 X 的影响面 / 调用链怎么走"——**优先用 `codegraph_*` 工具**（比 grep 准且快）；拿不准索引新鲜度先看 `codegraph_status`；查不到再降级 grep/read。
-- **`.memory`**：遇到**不懂的业务术语、"为什么这么设计"、有没有红线/约定**时，按 `.memory/记忆索引.md` 的查询流水线读对应文件。**仅在需要时查**——纯结构问题归 codegraph，常规实现/改文案/调样式这类任务**不必强读记忆索引**（记忆只存不可推导的业务知识，强读纯属浪费 token + 干扰）。
+所以 leader **不需要**再注入这些——只需在派活前确认该项目装了 codegraph / 记忆系统（没装则降级，grep/read 照样跑）。结构问题归 codegraph、业务语义按需查记忆，这些规则项目 `CLAUDE.md` 里已写好。
 
-**写入侧（记忆更新）**：仍由各项目的 `project-memory-maintainer` 子 Agent 负责，**别让普通 dev 直接写 `.memory/`**。多项目 boss 模式下项目的 `Stop`/`SessionEnd` hook 往往不在 leader 当前会话触发（更新频率本就低、可接受）；若某项目刚发生**重要决策 / 红线变化**值得落库，leader 可在该项目显式触发一次：spawn 它的 `project-memory-maintainer`，或跑 `node <项目>/.claude/hooks/memory-precheck.mjs` 看是否够阈值。codegraph 则**无需操心更新**——它靠文件监听自动重建，队员改了码约 1 秒内进索引。
+### 9.2 团队级（通信纪律 + 队员必守的团队守则）——写进团队根 CLAUDE.md 自动下发
+
+团队守则 `.tvs-boss/rules.md` 不是 `CLAUDE.md`、不会被队员自动读。要让队员自动遵守团队级规矩，靠**团队根的 `CLAUDE.md` 里一个受管块**（由 `SKILL.md` 启动协议的"团队简报"步骤生成/同步），队员在团队根/子项目 cwd 下自动加载它。该块含两类：
+
+- **队员通信纪律（静态、所有队员通用）**：完成任务 → 用 `SendMessage` 给 leader 回报**一次**结构化结果 → 之后**保持静默**；不刷"等待指示/随时待命"之类寒暄，**不沿用主对话的颜文字闲聊人设**——子 agent 要惜字如金。（这条直接根治"队员完成后自言自语刷屏"。）
+- **队员必守的团队守则**：从 `rules.md` 里挑出"队员自己要遵守"的条目（如禁改某目录、跨项目约定）同步进来；纯 leader 执行的守则（push/合主线/分支闸门）不必下发，leader 把关即可。
+
+### 9.3 写入侧（记忆更新）
+
+仍由各项目的 `project-memory-maintainer` 子 Agent 负责，**别让普通 dev 直接写 `.memory/`**。多项目 boss 模式下项目的 `Stop`/`SessionEnd` hook 往往不在 leader 当前会话触发（更新频率本就低、可接受）；若某项目刚发生**重要决策 / 红线变化**值得落库，leader 可在该项目显式触发一次：spawn 它的 `project-memory-maintainer`，或跑 `node <项目>/.claude/hooks/memory-precheck.mjs` 看是否够阈值。codegraph 则**无需操心更新**——靠文件监听自动重建，队员改了码约 1 秒内进索引。

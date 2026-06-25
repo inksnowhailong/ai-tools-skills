@@ -40,6 +40,24 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - 必须"按团队生成"而非塞进 skill 源码的原因：启动器是运行态产物，落在团队数据 `.tvs-boss/` 里、每个团队根各异。
 - 告诉用户："面板启动器已就位，双击 `<团队根>\.tvs-boss\panel.cmd`（mac 为 `panel.command`）即可开看板。"
 
+### 4.5 维护团队简报到团队根 CLAUDE.md（建团 / 恢复 都做，幂等）
+
+让队员**自动**遵守团队级规矩——不靠 leader 每次注入（费 token、拖慢、靠自觉）。在**团队根的 `CLAUDE.md`** 里维护一个受管块（队员在团队根/子项目 cwd 下会自动加载它）：
+
+```markdown
+<!-- tvs-boss:team-brief (队员自动加载，勿手改；由 /tvs-boss 维护) -->
+## tvs-boss 队员须知
+
+- **通信纪律**：完成任务 → 用 SendMessage 给 leader 回报一次结构化结果 → 之后保持静默；
+  不要刷"等待指示/随时待命"之类寒暄，不沿用主对话的颜文字闲聊人设，惜字如金。
+- **团队硬守则（队员必守）**：<从 .tvs-boss/rules.md 同步"队员自己要遵守"的条目；纯 leader 执行的 push/合主线/分支闸门不写这>
+<!-- /tvs-boss:team-brief -->
+```
+
+- **幂等**：已有该块则只更新块内内容（按当前 `rules.md` 同步队员必守条目），块外的 `CLAUDE.md` 内容一律保留不动；没有则在文件末尾追加。
+- 团队根**就是某项目根**（单项目团队）时，这块写进该项目 `CLAUDE.md`；团队根是父目录（多项目）时写进父目录的 `CLAUDE.md`，队员从子项目 cwd 向上自动加载。
+- 通信纪律是静态固定文案，每次照写即可；队员必守守则随 `rules.md` 变化同步。
+
 ### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
@@ -55,7 +73,8 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - **进度可见**：每条需求建一个 Claude 原生 Task，随流水线阶段 `TaskUpdate`，boss 在任务面板实时看到（细则见 `leader-protocol.md` 第八节）。
 - **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史**。注意：原生 Task 是 harness 维护、可由 git 现状重推的**活列表**，不算"会过期的状态文件"，不与本条冲突；但仍**不**把运行态写进 `.tvs-boss/`。
 - **外部依赖（自动借力）**：leader **按任务复杂度自动选**最合适的计划/纪律 skill（OMC plan/ralplan/ralph/autopilot/ultrawork/team + superpowers writing-plans/TDD/systematic-debugging…），轻量任务轻量规划、重型任务可上自治循环；**全部受分支闸门 + push 闸门约束**，没装则降级普通 spawn（细则见 `leader-protocol.md` 第三节）。
-- **项目增强按需协同**：派活进某项目时探测 `.memory/` / `codegraph`，有就让队员**按需用**——结构问题（定义/调用链/影响面）优先 `codegraph_*`、需要业务语义才按 `.memory/记忆索引.md` 查，**不需要就别强读记忆**；codegraph 靠文件监听自动更新无需操心，记忆写入仍归各项目维护子 Agent；缺了自动降级 grep/read（细则见 `leader-protocol.md` 第九节）。
+- **队员上下文靠自动加载、不靠注入**：队员会自动加载用户级 + cwd 目录链的 `CLAUDE.md`。所以项目级增强（codegraph 指令、记忆宪法、架构约定——本就写在项目 `CLAUDE.md` 里）队员**自动具备**，leader **不再注入**（省 token/省速度）；团队级规矩（通信纪律 + 队员必守守则）写进**团队根 `CLAUDE.md` 的 tvs-boss 受管块**（启动协议 4.5 步）自动下发。记忆写入仍归各项目维护子 Agent，codegraph 靠文件监听自动更新（细则见 `leader-protocol.md` 第九节）。
+- **队员通信纪律**：完成 → SendMessage 回报 leader 一次 → 静默；不刷待命寒暄、不沿用颜文字闲聊人设（根治"队员完成后自言自语刷屏"）。该纪律由团队根 CLAUDE.md 自动下发给每个队员。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
