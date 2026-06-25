@@ -46,12 +46,15 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 > **boss 说"看面板 / 打开面板 / 开看板"时**：leader 直接跑 `node "$SKILL/scripts/open-panel.mjs" --root "<团队根>"` 替 boss 把面板弹出来（跨平台自动开窗：Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app；linux 用 $TERMINAL 兜底）。**不要让 boss 自己敲命令**——leader 知道 `$SKILL` 和团队根，全自定位。
 
 ## 核心铁律（已焊死）
-- **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离；worktree 仅"单项目内多角色改同 repo"时才用。
+- **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离。
+- **分支治理（起飞闸门）**：分支 / worktree 是**按需申请**的动作、不是默认动作——能续在途分支就续、当前分支干净可直接用、**需新建必须先经 boss 同意**，未授权绝不新建、别建一堆（细则见 `leader-protocol.md` 第七节）。此闸门**先于一切执行**（含自动自治循环）。worktree 仅"单项目内多角色改同 repo"才考虑，同样走申请。
+- **派队员必传合法 model 别名**：`opus|sonnet|haiku` 三者之一，**绝不传全模型 ID（claude-opus-4-8…）或 tier 词（deep）**——否则被工具忽略、队员全继承 leader 的 Opus（又慢又烧 token）。见 `agent-roles.md` 的 model 铁律。
 - **dev 绑项目**；review/test 等是全队共享角色。
-- **温常驻（懒启动）**：启动/恢复时不预 spawn 任何角色，**任务来了才起**；热 dev 工作集封顶 3（满了 LRU 踢）；按角色三档回收 + max-idle 天花板（细则见 `leader-protocol.md` 第四节）。
-- **完成语义**：commit 到功能分支可自动；**push / 合并主线必须停下等用户确认**。
-- **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史、不存"谁此刻在干什么"**（那靠 git 分支现推）。一旦越存越多，就是混进了多余的东西。
-- **外部依赖**：leader 可在合适时机调用已装的全局 skill 增强。
+- **温常驻（懒启动）**：启动/恢复时不预 spawn 任何角色，**任务来了才起**；热 dev 工作集封顶 4（满了 LRU 踢）；按角色三档回收 + max-idle 天花板（细则见 `leader-protocol.md` 第四节）。
+- **完成语义**：commit 到功能分支可自动；**push / 合并主线必须停下等用户确认**（自治循环也不例外）。
+- **进度可见**：每条需求建一个 Claude 原生 Task，随流水线阶段 `TaskUpdate`，boss 在任务面板实时看到（细则见 `leader-protocol.md` 第八节）。
+- **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史**。注意：原生 Task 是 harness 维护、可由 git 现状重推的**活列表**，不算"会过期的状态文件"，不与本条冲突；但仍**不**把运行态写进 `.tvs-boss/`。
+- **外部依赖（自动借力）**：leader **按任务复杂度自动选**最合适的计划/纪律 skill（OMC plan/ralplan/ralph/autopilot/ultrawork/team + superpowers writing-plans/TDD/systematic-debugging…），轻量任务轻量规划、重型任务可上自治循环；**全部受分支闸门 + push 闸门约束**，没装则降级普通 spawn（细则见 `leader-protocol.md` 第三节）。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
