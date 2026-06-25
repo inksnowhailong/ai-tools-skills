@@ -129,3 +129,19 @@
 - **归属**：Task 由 leader（主会话）维护——sub-agent 通过 SendMessage 报结果，**leader 据此 `TaskUpdate`**，sub-agent 不直接写 leader 的 Task。
 - **不违背"记忆有界"铁律**：原生 Task 是 **harness 维护的活列表**、可随时由 git 现状重推（第六节），不是手写易过期的 md，也不落进 `.tvs-boss/` 记忆。**不要**再为此恢复 `live-agents.json` 或加面板运行态屏。
 - 没有 Task 工具的环境（如部分 IDE）：降级为口述进度（第五节扫 git），功能不受影响。
+
+## 九、项目记忆 + codegraph 协同（派活时按需注入，能用就用、不强读）
+
+很多项目各自部署了**记忆工程（`.memory/`）**和**结构图谱（codegraph）**。派 dev/角色进某项目前，leader 先探测它装了哪些，再把"按需使用"提示注入队员上下文。
+
+**核心原则：有就让队员会用、按需用；不需要就别为读而读；缺了自动降级（grep/read），不阻塞。**
+
+**探测（一眼可判，零成本）：**
+- 项目根有 `.memory/` → 该项目有记忆工程。
+- 项目根有 `.codegraph/`（或 `codegraph_status` 能返回）→ 有结构图谱。
+
+**注入给队员的话（按探测结果拼，没探测到的就不提）：**
+- **codegraph**：遇到结构问题——"X 在哪定义 / 谁调用 X / 改 X 的影响面 / 调用链怎么走"——**优先用 `codegraph_*` 工具**（比 grep 准且快）；拿不准索引新鲜度先看 `codegraph_status`；查不到再降级 grep/read。
+- **`.memory`**：遇到**不懂的业务术语、"为什么这么设计"、有没有红线/约定**时，按 `.memory/记忆索引.md` 的查询流水线读对应文件。**仅在需要时查**——纯结构问题归 codegraph，常规实现/改文案/调样式这类任务**不必强读记忆索引**（记忆只存不可推导的业务知识，强读纯属浪费 token + 干扰）。
+
+**写入侧（记忆更新）**：仍由各项目的 `project-memory-maintainer` 子 Agent 负责，**别让普通 dev 直接写 `.memory/`**。多项目 boss 模式下项目的 `Stop`/`SessionEnd` hook 往往不在 leader 当前会话触发（更新频率本就低、可接受）；若某项目刚发生**重要决策 / 红线变化**值得落库，leader 可在该项目显式触发一次：spawn 它的 `project-memory-maintainer`，或跑 `node <项目>/.claude/hooks/memory-precheck.mjs` 看是否够阈值。codegraph 则**无需操心更新**——它靠文件监听自动重建，队员改了码约 1 秒内进索引。

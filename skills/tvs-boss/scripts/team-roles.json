@@ -1,7 +1,7 @@
 {
     "schemaVersion": 2,
     "updatedAt": "2026-06-22",
-    "note": "角色池。spawn 优先用 omcSubagentType（直接传给 Agent 工具的 subagent_type 参数，omc agent 自带 systemPrompt，无需手动注入）；无 omcSubagentType 时降级：取 systemPrompt 手动注入通用 agent。三档：deep=重推理、fast=常规实现、cheap=只读探索。【Claude 目标的 model 必须是 Agent 工具认的别名 opus/sonnet/haiku——见 modelsByTarget.claude；传全模型 ID（claude-opus-4-8 等）或 tier 词（deep）都会被工具忽略→队员继承 leader 的 Opus，这正是历史上「改 model 无效、全 Opus、又慢又烧 token」的根因。各角色的 defaultModel 仅作「档位参考」，绝不可直接当 model 传给 Agent 工具。】",
+    "note": "角色池。spawn 优先用 omcSubagentType（直接传给 Agent 工具的 subagent_type 参数，omc agent 自带 systemPrompt，无需手动注入）；无 omcSubagentType 时降级：取 systemPrompt 手动注入通用 agent。三档：deep=重推理、fast=常规实现、cheap=只读探索。【Claude 目标的 model 必须是 Agent 工具认的别名 opus/sonnet/haiku——见 modelsByTarget.claude；传全模型 ID（claude-opus-4-8 等）或 tier 词（deep）都会被工具忽略→队员继承 leader 的 Opus，这正是历史上「改 model 无效、全 Opus、又慢又烧 token」的根因。各角色的 defaultModel 仅作「档位参考」，绝不可直接当 model 传给 Agent 工具。】 各角色 suggestedTools 里的 SemanticSearch 是跨工具结构搜索占位——在装了 codegraph 的项目里、Claude 宿主下，结构问题（定义/调用链/影响面）应优先用 codegraph_* MCP 工具，详见 leader-protocol 第九节的按需注入规则。",
     "modelsByTarget": {
         "cursor": {
             "deep": "claude-opus-4-7-thinking-max",

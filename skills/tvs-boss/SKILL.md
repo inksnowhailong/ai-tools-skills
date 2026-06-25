@@ -55,6 +55,7 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - **进度可见**：每条需求建一个 Claude 原生 Task，随流水线阶段 `TaskUpdate`，boss 在任务面板实时看到（细则见 `leader-protocol.md` 第八节）。
 - **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史**。注意：原生 Task 是 harness 维护、可由 git 现状重推的**活列表**，不算"会过期的状态文件"，不与本条冲突；但仍**不**把运行态写进 `.tvs-boss/`。
 - **外部依赖（自动借力）**：leader **按任务复杂度自动选**最合适的计划/纪律 skill（OMC plan/ralplan/ralph/autopilot/ultrawork/team + superpowers writing-plans/TDD/systematic-debugging…），轻量任务轻量规划、重型任务可上自治循环；**全部受分支闸门 + push 闸门约束**，没装则降级普通 spawn（细则见 `leader-protocol.md` 第三节）。
+- **项目增强按需协同**：派活进某项目时探测 `.memory/` / `codegraph`，有就让队员**按需用**——结构问题（定义/调用链/影响面）优先 `codegraph_*`、需要业务语义才按 `.memory/记忆索引.md` 查，**不需要就别强读记忆**；codegraph 靠文件监听自动更新无需操心，记忆写入仍归各项目维护子 Agent；缺了自动降级 grep/read（细则见 `leader-protocol.md` 第九节）。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。

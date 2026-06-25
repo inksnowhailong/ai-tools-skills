@@ -20,6 +20,7 @@
    `Agent({ model: "opus|sonnet|haiku", prompt: "<systemPrompt>\n\n<任务上下文>" })`
 
 2. **无论哪条路径，dev 场景都要通过 prompt 补注项目上下文**：`path / 主分支 / 当前需求`；只读/分析类角色可跨项目共享。
+3. **按需注入项目增强感知（见 `leader-protocol.md` 第九节）**：探测目标项目有没有 `.memory/` / `.codegraph/`，有就在 prompt 里告诉队员"结构问题优先用 `codegraph_*`、需要业务语义时按 `.memory/记忆索引.md` 查"——但**只在任务用得上时提，不强制每个任务都读记忆**。结构类/勘察/分析/实现角色尤其应优先用 codegraph 而非 grep。
 
 ## 19 角色一览
 
