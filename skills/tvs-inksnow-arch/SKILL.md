@@ -41,7 +41,7 @@ disable-model-invocation: true
 按以下顺序检查（任一命中即视为已安装）：
 
 1. 当前 Agent 环境的可用 skill 列表（最权威：Claude Code 的 available skills、Cursor 的 skill 面板等）
-2. Claude Code 路径：`Glob ~/.claude/skills/tvs-deep-interview/SKILL.md`（用户级）、`Glob .claude/skills/tvs-deep-interview/SKILL.md`（项目级）
+2. Claude Code 路径：`Glob ~/.claude/skills/tvs-deep-interview/SKILL.md`（用户级）、`Glob .claude/skills/tvs-deep-interview/SKILL.md`（项目级）、`Glob ~/.claude/plugins/cache/tvs-inksnow/tvs-inksnow/*/skills/tvs-deep-interview/SKILL.md`（CC 插件安装）
 3. Cursor 路径：`Glob ~/.cursor/skills/tvs-deep-interview/SKILL.md`（用户级）、`Glob .cursor/skills/tvs-deep-interview/SKILL.md`（项目级）
 
 ### 情况 A：已安装

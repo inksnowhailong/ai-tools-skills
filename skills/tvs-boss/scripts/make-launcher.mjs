@@ -5,7 +5,8 @@
  * 为什么要"生成"而不是把启动器塞进 skill 源码：
  *   - 启动器是「运行态产物」，每个用户的团队根各异，属于团队数据（.tvs-boss/）而非工具本体。
  *   - 启动器是「薄壳」：运行时同时自定位两样——团队根（%~dp0 / $(dirname)）+ 本机 skill 里的
- *     open-panel.mjs（探 ~/.claude → ~/.cursor）。两者都不写死绝对路径，平台开窗逻辑全在 open-panel 一处。
+ *     open-panel.mjs（探 ~/.claude → ~/.cursor → CC 插件缓存 plugins/cache/tvs-inksnow/...）。
+ *     两者都不写死绝对路径，平台开窗逻辑全在 open-panel 一处。
  *
  * 用法：node make-launcher.mjs --root <团队根>
  *   把 panel.cmd（Windows）和 panel.command（mac/linux）都写进 <团队根>/.tvs-boss/。
@@ -38,6 +39,8 @@ function cmdTemplate() {
         'set "HERE=%HERE:~0,-1%"',
         `set "OP=%USERPROFILE%\\.claude\\${REL_WIN}"`,
         `if not exist "%OP%" set "OP=%USERPROFILE%\\.cursor\\${REL_WIN}"`,
+        'rem CC plugin install: skill lives under plugins\\cache\\<marketplace>\\<plugin>\\<version>\\ (last match wins)',
+        `if not exist "%OP%" for /d %%D in ("%USERPROFILE%\\.claude\\plugins\\cache\\tvs-inksnow\\tvs-inksnow\\*") do if exist "%%D\\${REL_WIN}" set "OP=%%D\\${REL_WIN}"`,
         'if not exist "%OP%" (',
         '  echo [tvs-boss] open-panel.mjs not found under %USERPROFILE%\\.claude or \\.cursor.',
         '  echo Install the tvs-boss skill on this machine first ^(see ai-tools-skills README^).',
@@ -61,7 +64,9 @@ function shTemplate() {
         'HERE="$(cd "$(dirname "$0")" && pwd)"',
         `OP="$HOME/.claude/${REL}"`,
         `[ -f "$OP" ] || OP="$HOME/.cursor/${REL}"`,
-        '[ -f "$OP" ] || { echo "[tvs-boss] open-panel.mjs not found under ~/.claude or ~/.cursor; install the tvs-boss skill on this machine first."; exit 1; }',
+        '# CC plugin install: skill lives under plugins/cache/<marketplace>/<plugin>/<version>/ (last match wins)',
+        `if [ ! -f "$OP" ]; then for d in "$HOME"/.claude/plugins/cache/tvs-inksnow/tvs-inksnow/*/; do [ -f "\${d}${REL}" ] && OP="\${d}${REL}"; done; fi`,
+        '[ -f "$OP" ] || { echo "[tvs-boss] open-panel.mjs not found under ~/.claude, ~/.cursor, or the tvs-inksnow plugin cache; install the tvs-boss skill on this machine first."; exit 1; }',
         'node "$OP" --root "$HERE"',
         '',
     ].join('\n');
@@ -82,7 +87,7 @@ function main() {
     writeFileSync(cmdPath, cmdTemplate());
     writeFileSync(shPath, shTemplate(), { mode: 0o755 }); // mac/linux 需可执行位
 
-    console.log('已生成启动器（运行时在本机 ~/.claude 或 ~/.cursor 下定位 open-panel.mjs，零绝对路径）：');
+    console.log('已生成启动器（运行时在本机 ~/.claude、~/.cursor 或 CC 插件缓存下定位 open-panel.mjs，零绝对路径）：');
     console.log('  ' + cmdPath);
     console.log('  ' + shPath);
 }

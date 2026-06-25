@@ -29,8 +29,19 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, resolve, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+
+// 本脚本在本机的真实调用路径（宿主无关）：Cursor 装则为 .cursor/hooks/…，Claude 为 .claude/hooks/…，
+// 插件为缓存目录。提示串里引用它而非写死 .cursor，换宿主/换机器都给出正确命令。
+const SELF_CMD = (() => {
+    try {
+        const self = process.argv[1] || fileURLToPath(import.meta.url)
+        const rel = relative(process.cwd(), self).replace(/\\/g, '/')
+        return rel && !rel.startsWith('..') ? rel : self.replace(/\\/g, '/')
+    } catch { return 'memory-precheck.mjs' }
+})()
 
 // preset: <选定的 preset 名>
 // 安装时必须把 SELECTED_PRESET 替换成前置检查阶段选定的 preset。
@@ -383,10 +394,10 @@ function buildMessage({ deltaFiles, reasons, sizeInfo }) {
         '- 未能确认的问题应写入 `待确认问题.md`，不能混入模块档案伪造成当前事实。',
         '- 如果代码入口路径在集成线不存在却被当作当前事实保留，或决策日志的历史条目正文被改写（只允许追加和状态行修订），禁止执行 `--mark-done`。',
         '- 禁止刷新基线时，应把未解决问题写入 `待确认问题.md`，或通过回执返回 blocked。',
-        '- 通过自检后再执行：`node .cursor/hooks/memory-precheck.mjs --mark-done` 刷新基线。',
+        `- 通过自检后再执行：\`node ${SELF_CMD} --mark-done\` 刷新基线。`,
         '',
         '--lint-memory 子命令：',
-        '- `node .cursor/hooks/memory-precheck.mjs --lint-memory` 扫描 `.memory/**` 中是否出现旧路径模式。',
+        `- \`node ${SELF_CMD} --lint-memory\` 扫描 \`.memory/**\` 中是否出现旧路径模式。`,
         '- 默认旧路径模式使用 CONFIG.lintMemoryStalePathPatterns 占位：`src/legacy/`、`src/old/`、`src/deprecated/`。',
         '- 命中且未带"历史" / "已迁出"等上下文时返回非零，视为 lint 失败。',
         '- 该子命令可用于 CI / 定期任务检查 memory 是否漂移；真实旧路径每个项目特定，请按项目情况补进 CONFIG。',

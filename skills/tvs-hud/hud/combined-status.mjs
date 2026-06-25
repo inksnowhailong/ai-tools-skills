@@ -17,9 +17,9 @@ import { spawnSync } from 'child_process';
 const node   = process.execPath;
 const HOME   = homedir();
 
-// ── 解析 omc 的 dist/hud/index.js 路径 ───────────────────────────────────────
-function resolveOmcHud() {
-  const base = join(HOME, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+// ── 在 <base>/<版本>/<...sub> 里按 SEMVER 选最新版命中的文件，无则 null ──────────
+// omc 与 tvs 两个插件缓存目录都是「版本号子目录」结构，共用这一套选版逻辑。
+function resolveVersioned(base, ...sub) {
   if (!existsSync(base)) return null;
   const SEMVER = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
   const versions = readdirSync(base)
@@ -31,10 +31,30 @@ function resolveOmcHud() {
       return 0;
     });
   for (const v of versions) {
-    const p = join(base, v, 'dist', 'hud', 'index.js');
+    const p = join(base, v, ...sub);
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+// ── 解析 omc 的 dist/hud/index.js 路径（插件缓存）────────────────────────────────
+function resolveOmcHud() {
+  return resolveVersioned(
+    join(HOME, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode'),
+    'dist', 'hud', 'index.js');
+}
+
+// ── 解析 tvs-hud 的 status.mjs 路径 ──────────────────────────────────────────────
+// 插件缓存优先（CC 装 tvs-inksnow 插件时 skill 在此），回退老 skills 目录（Cursor/软链/拷贝安装）。
+// 修复点：原先写死 ~/.claude/skills/tvs-hud/scripts/status.mjs，插件安装下该路径不存在 →
+// runSubprocess 静默返回空 → tvs 三行消失且无报错。
+function resolveTvsHud() {
+  const fromPlugin = resolveVersioned(
+    join(HOME, '.claude', 'plugins', 'cache', 'tvs-inksnow', 'tvs-inksnow'),
+    'skills', 'tvs-hud', 'scripts', 'status.mjs');
+  if (fromPlugin) return fromPlugin;
+  const legacy = join(HOME, '.claude', 'skills', 'tvs-hud', 'scripts', 'status.mjs');
+  return existsSync(legacy) ? legacy : null;
 }
 
 // ── 主进程内 import + 拦截 stdout ──────────────────────────────────────────────
@@ -77,10 +97,10 @@ function runSubprocess(script) {
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
-const tvsScript = join(HOME, '.claude', 'skills', 'tvs-hud', 'scripts', 'status.mjs');
+const tvsScript = resolveTvsHud();
 
 // tvs-hud 先启（子进程异步），omc 主进程 import 同时跑
-const tvsOut = runSubprocess(tvsScript);   // spawnSync = 等结果
+const tvsOut = tvsScript ? runSubprocess(tvsScript) : '';   // spawnSync = 等结果
 
 const omcPath = resolveOmcHud();
 const omcOut  = omcPath ? await captureInProcess(omcPath) : '';
