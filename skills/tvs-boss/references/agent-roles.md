@@ -4,18 +4,20 @@
 
 ## leader 怎么 spawn 一个角色
 
-1. 查 `scripts/team-roles.json` 该角色是否有 `omcSubagentType` 字段：
+1. 查 `scripts/team-roles.json` 该角色是否有 `omcSubagentType` 字段。
 
-   **两条路径都必须显式传 `model`**——不传会继承 leader 的全局默认（通常是 opus），导致所有角色全跑最贵档。
-   模型档从角色的 `tier` 字段读（有则用），否则从 `defaultModel` 反推：`deep→opus`、`fast→sonnet`、`cheap→haiku`。
+   **⚠️ model 取值铁律（最常见的坑）**：`model` 参数**只能**是 Agent 工具认的别名之一——`opus` / `sonnet` / `haiku`（还有 `fable`，本系统不用）。
+   - **绝不要**传全模型 ID（`claude-opus-4-8`、`claude-sonnet-4-6` 等），**也不要**传 tier 词（`deep`/`fast`/`cheap`）——这两类都不是合法值，会被工具**静默忽略**，导致队员继承 leader 的 Opus（"改 model 无效、全 Opus、又慢又烧 token"就是这么来的）。
+   - 取值方法（任选其一，结果一致）：① 直接看角色 `defaultModel` 属于哪个家族——含 `opus`→传 `opus`、含 `sonnet`→传 `sonnet`、含 `haiku`→传 `haiku`；② 或按 tier 映射 `deep→opus`、`fast→sonnet`、`cheap→haiku`（等价于查 `modelsByTarget.claude[tier]`，该表已是别名）。
+   - **必须显式传**——不传也会继承 leader 的 Opus。
 
    **有 `omcSubagentType`（18/19 角色）→ 优先路径：**
-   `Agent({ subagent_type: "<omcSubagentType>", model: "<tier>", prompt: "..." })`
-   omc agent 自带 systemPrompt，无需手动注入；但 **model 必须显式传**。
+   `Agent({ subagent_type: "<omcSubagentType>", model: "opus|sonnet|haiku", prompt: "..." })`
+   omc agent 自带 systemPrompt，无需手动注入；但 **model 必须按上面铁律显式传别名**。
 
    **无 `omcSubagentType`（仅 `vision`）→ 降级路径：**
    取 `systemPrompt` 手动注入通用 agent：
-   `Agent({ model: "<tier>", prompt: "<systemPrompt>\n\n<任务上下文>" })`
+   `Agent({ model: "opus|sonnet|haiku", prompt: "<systemPrompt>\n\n<任务上下文>" })`
 
 2. **无论哪条路径，dev 场景都要通过 prompt 补注项目上下文**：`path / 主分支 / 当前需求`；只读/分析类角色可跨项目共享。
 
