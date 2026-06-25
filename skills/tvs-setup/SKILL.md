@@ -20,7 +20,8 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 |---|---|
 | `detect` | 宿主（claude/cursor）+ 每个 skill 的安装状态 + 孤儿目录 + 第三方生态探测 |
 | `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主 |
-| `doctor [--fix]` | detect 全部内容 + 死脚本引用扫描 + frontmatter lint + README 同步检查 + HUD 接管链路检查；`--fix` 自动修复漂移拷贝、断链与 HUD 接管 |
+| `doctor [--fix]` | 只读体检：detect 全部内容 + 死脚本引用 + frontmatter + README 同步 + HUD 链路；**每个问题标 `fixClass`**（auto/auto-confirm/guided）；`--fix` 自动修复 auto 类（漂移/断链/HUD）。输出 `installForm`（当前安装形式）|
+| `repair [--prune] [--prune-stale-claude]` | **自愈入口** = `doctor --fix` + 破坏性清理（需显式 flag、先告知用户）：`--prune` 清孤儿、`--prune-stale-claude` 删"插件已装却又在 ~/.claude/skills 的旧目录安装"（mixed 形式去重，只删本仓库 skill、留用户自有）。可在插件形式下运行（自愈正需如此）|
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
 | `bootstrap` | 插件消费者一次性自举：静默归一 `skillListingBudgetFraction=0.02` + 写 marker + 输出依赖安装计划（见下节"插件自举"）。由 SessionStart 钩子自动提示触发 |
 
@@ -66,6 +67,21 @@ tvs 专注差异化：任务账本、字符画分析、个人代码观、思维�
 
 - 缺失时把 `hint` 命令和 `why` 一句话给用户，**征得同意后可以代跑安装命令**；用户拒绝不影响 tvs 任何功能（所有 tvs skill 都有降级路径）。
 - 全部就绪时一句话确认即可，不要重复推销。
+
+## 自愈框架（doctor / repair 的设计理念）
+
+目标：让整套 skill **自检 + 自愈到可运行**，而不是用户每次列举一个个坏点。三块：
+
+1. **健康契约（分类表 `FIX_CLASS`）**：每类问题声明能否自动修——`auto`（无副作用，repair 直接修：漂移/断链/HUD 链路）、`auto-confirm`（破坏性，需 flag + 先告知用户：孤儿、mixed 去重）、`guided`（需人/AI 判断或改仓库源：死引用/frontmatter/linked-elsewhere/repo 落后）。doctor 给每个问题打上分类，AI 据此决定怎么处理。**新增一类故障，只需往契约表加一条，从此全机器自动检测——这是"不用用户列举"的关键。**
+2. **形式感知（`installForm`）**：先判当前是 `plugin` / `link`（作者）/ `copy`（消费者）/ `mixed`（插件+旧目录并存=重复）/ `none`，因为"什么叫健康"随形式不同。所有检测按形式判对错。
+3. **修复引擎（`repair`）**：跑契约、自动修 auto 类、对 auto-confirm 类要 flag、guided 类交 AI/用户。可在插件形式下运行。
+
+### 安装形式相关的处置（detect/doctor 会给出 `installForm`）
+
+- **`mixed`（插件已装 + 旧 AI/目录安装并存）**：报 `claude-dup-with-plugin`。CC 建议交给插件——**告知用户后**用 `repair --prune-stale-claude` 删旧目录安装（只删本仓库 skill、保留孤儿与用户自有，绝不误伤）。
+- **`plugin`（纯插件）**：健康，`install` 默认会跳过 claude（防重复），不主动往 ~/.claude/skills 装。
+- **`link` / `copy`（一直用 AI/脚本安装、没装插件）**：**维持现状**，绝不硬推插件；正常 install/repair 即可。
+- 判断"该不该清旧安装"只看 `mixed`：插件与目录安装同时存在才清；只有其一不动。
 
 ## HUD 状态栏接管（tvs-hud 依赖链路）
 

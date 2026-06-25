@@ -39,6 +39,8 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..', '..', '..')
 const SKILLS_DIR = join(REPO_ROOT, 'skills')
 /** 复制/哈希时排除的目录与文件（运行期状态，不属于 skill 本体） */
 const EXCLUDES = new Set(['.omc', '.git', 'node_modules', '.DS_Store'])
+/** "本仓库 skill 已实际安装到该宿主目录"的状态集（软链/拷贝），区别于 missing/host-absent/孤儿 */
+const INSTALLED_STATES = ['linked', 'copy-synced', 'copy-drift']
 
 // ---------- 基础工具 ----------
 
@@ -370,7 +372,6 @@ function detect() {
     const hud = checkHud()
     const repo = repoStatus(true)
     // CC 插件已装且 tvs-setup 又往 ~/.claude/skills 装过本仓库 skill → 重复
-    const INSTALLED_STATES = ['linked', 'copy-synced', 'copy-drift']
     const pluginDup = pluginInstalled('tvs-inksnow')
         && repoSkills.some((s) => INSTALLED_STATES.includes(skills[s].claude?.state))
     const summary = []
@@ -388,15 +389,77 @@ function detect() {
         if (k === 'node') continue
         summary.push(`${k}: ${v.installed ? '✅ 已就绪' : '⬜ 未安装（可增强）'}`)
     }
+    const installForm = resolveInstallForm({ hosts: H, skills })
+    for (const [hostName, form] of Object.entries(installForm)) {
+        if (form === 'host-absent') continue
+        summary.push(`安装形式(${hostName}): ${INSTALL_FORM_LABEL[form] || form}`)
+    }
     summary.push(`HUD 接管(claude): ${hudLabel(hud)}`)
-    if (pluginDup) summary.push('⚠️ 重复：CC 插件 tvs-inksnow 已装，且 tvs-setup 也往 ~/.claude/skills 装过——CC 建议交给插件，移除 tvs-setup 的 claude 安装')
+    if (pluginDup) summary.push('⚠️ 重复：CC 插件 tvs-inksnow 已装，且 tvs-setup 也往 ~/.claude/skills 装过——CC 建议交给插件，移除 tvs-setup 的 claude 安装（repair --prune-stale-claude 可清，先确认）')
     if (repo.isGitRepo) {
         if (repo.note) summary.push(`仓库版本: ⚠️ ${repo.note}`)
         else if (repo.behind > 0) summary.push(`仓库版本: ⬆️ 落后远程 ${repo.behind} 个提交（用户确认后可 update --pull 更新）`)
         else summary.push('仓库版本: ✅ 已是最新' + (repo.fetchOk === false ? '（远程不可达，本地缓存比较）' : ''))
     }
 
-    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, pluginDup, repo, summary }
+    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, pluginDup, installForm, repo, summary }
+}
+
+// ---------- 自愈框架：安装形式解析 ----------
+//
+// 形式决定"什么叫健康"：plugin 下 ~/.claude/skills/tvs-* 是多余（该交给插件）；
+// link/copy 下它才是正解。所以所有检测/修复都要先知道当前形式，再判断对错。
+
+const INSTALL_FORM_LABEL = {
+    plugin: 'CC 原生插件', link: '软链（作者开发态）', copy: '拷贝（消费者）',
+    mixed: '⚠️ 插件 + 旧目录安装并存（重复）', none: '未安装',
+}
+
+// 自愈契约（分类雏形）：每类问题能否自动修。
+//   auto         —— repair（doctor --fix）自动修复，无副作用风险
+//   auto-confirm —— 破坏性，需显式 flag（--prune / --prune-stale-claude），由 AI 先向用户确认
+//   guided       —— 需人/AI 判断、或改仓库源文件，脚本不自动动
+const FIX_CLASS = {
+    'copy-drift': 'auto', 'broken-link': 'auto',
+    'hud-bridge-not-installed': 'auto', 'hud-bridge-drift': 'auto',
+    'statusline-not-wired': 'auto', 'statusline-missing-omc-hud-flag': 'auto',
+    'orphan': 'auto-confirm', 'claude-dup-with-plugin': 'auto-confirm',
+    'linked-elsewhere': 'guided', 'dead-script-ref': 'guided',
+    'frontmatter-name-mismatch': 'guided', 'frontmatter-no-description': 'guided',
+    'readme-missing-skill': 'guided', 'hud-bridge-missing-in-repo': 'guided',
+    'repo-outdated': 'guided',
+}
+const fixClassOf = (kind) => FIX_CLASS[kind] || 'guided'
+
+/** 按每个宿主的 per-skill 状态 + 插件存在性，推断当前安装形式 */
+function resolveInstallForm(det) {
+    const out = {}
+    const repoSkills = Object.keys(det.skills)
+    for (const hostName of Object.keys(det.hosts)) {
+        if (!det.hosts[hostName].exists) { out[hostName] = 'host-absent'; continue }
+        const states = repoSkills.map((s) => det.skills[s][hostName]?.state)
+        const hasInstalled = states.some((st) => INSTALLED_STATES.includes(st))
+        const linkCount = states.filter((st) => st === 'linked').length
+        const copyCount = states.filter((st) => st === 'copy-synced' || st === 'copy-drift').length
+        const pluginHere = hostName === 'claude' && pluginInstalled('tvs-inksnow')
+        if (pluginHere && hasInstalled) out[hostName] = 'mixed'
+        else if (pluginHere) out[hostName] = 'plugin'
+        else if (hasInstalled) out[hostName] = linkCount >= copyCount ? 'link' : 'copy'
+        else out[hostName] = 'none'
+    }
+    return out
+}
+
+/** mixed 形式下移除 ~/.claude/skills 里的【本仓库 skill】安装（只删仓库已知的，保留孤儿/用户自有，避免误伤）。调用方须已向用户确认。 */
+function pruneStaleClaudeInstalls(det) {
+    const removed = []
+    const claudeSkillsDir = hosts().claude.skillsDir
+    for (const s of Object.keys(det.skills)) {
+        if (INSTALLED_STATES.includes(det.skills[s].claude?.state)) {
+            try { removeInstalled(join(claudeSkillsDir, s)); removed.push(s) } catch { /* 忽略单个失败 */ }
+        }
+    }
+    return removed
 }
 
 // ---------- install ----------
@@ -487,8 +550,11 @@ function checkScriptRefs(skillName) {
         let p = m[1]
             .replace(/<skill-path>/g, dir)
             .replace(/\{SKILL_DIR\}/g, dir)
+        // 占位符/运行期变量路径（$SKILL、${CLAUDE_PLUGIN_ROOT}、<本机>、<队名> 等）静态无法核验，跳过——
+        // 否则恒为误报，污染自愈契约。替换掉已知占位后仍残留 $ { } < > 的，一律视为运行期路径。
+        if (/[$<>{}]/.test(p)) continue
         // 项目运行期路径（部署产物）不在仓库内，跳过
-        if (/^\.?(\.\/)?(\.cursor|\.claude|\.codex|<宿主)/.test(p) || p.includes('宿主')) continue
+        if (/^\.?(\.\/)?(\.cursor|\.claude|\.codex)/.test(p) || p.includes('宿主')) continue
         if (!existsSync(p) && !existsSync(join(dir, p))) {
             issues.push({ kind: 'dead-script-ref', skill: skillName, ref: m[1] })
         }
@@ -550,11 +616,20 @@ function doctor(args) {
     }
     issues.push(...checkReadme(repoSkills))
     for (const [hostName, list] of Object.entries(det.orphans)) {
-        for (const o of list) issues.push({ kind: 'orphan', skill: o, host: hostName, hint: 'install --prune 可清除' })
+        for (const o of list) {
+            issues.push({ kind: 'orphan', skill: o, host: hostName, hint: 'repair --prune 可清除' })
+            if (args.prune) {
+                try { removeInstalled(join(hosts()[hostName].skillsDir, o)); fixes.push(`已清除孤儿 ${hostName}/${o}`) } catch { /* ignore */ }
+            }
+        }
     }
     if (det.pluginDup) {
         issues.push({ kind: 'claude-dup-with-plugin', skill: 'Claude Code 重复安装', host: 'claude',
-            hint: 'CC 已装 tvs-inksnow 插件；手动删 ~/.claude/skills/tvs-* 或 install --target cursor 只装其他工具。脚本不自动删 claude skills（避免误伤）' })
+            hint: '已装 tvs-inksnow 插件、又往 ~/.claude/skills 装过本仓库 skill → 重复。repair --prune-stale-claude 删旧目录安装（只删本仓库 skill、留孤儿/用户自有），或 install --target cursor 只装其他工具。' })
+        if (args['prune-stale-claude']) {
+            const removed = pruneStaleClaudeInstalls(det)
+            if (removed.length) fixes.push(`已移除 claude 旧目录安装（交给插件）：${removed.join(', ')}`)
+        }
     }
     // HUD 接管链路（仅 claude）
     if (!det.hud?.skipped && det.hud?.issues?.length) {
@@ -571,13 +646,25 @@ function doctor(args) {
         issues.push({ kind: 'repo-outdated', skill: `落后远程 ${det.repo.behind} 个提交`, hint: '展示新提交给用户，确认后 update --pull' })
     }
 
+    // 给每个问题标自愈分类（契约），供 AI 决定怎么处理
+    for (const i of issues) i.fixClass = fixClassOf(i.kind)
+    // 已经修过（args.fix）后，仍残留的"本可自动修"项＝修不动/未触发的；未修时则是"待 repair"
+    const remaining = issues.filter((i) => !fixes.some((f) => f.includes(i.skill)))
+    const autoLeft = remaining.filter((i) => i.fixClass === 'auto')
+    const confirmLeft = remaining.filter((i) => i.fixClass === 'auto-confirm')
+    const guidedLeft = remaining.filter((i) => i.fixClass === 'guided')
+
     const summary = [
         ...fresh.summary,
         issues.length === 0 ? '✅ 体检通过，未发现问题' : `发现 ${issues.length} 个问题`,
-        ...issues.map((i) => `[${i.kind}] ${i.host ? i.host + '/' : ''}${i.skill}${i.ref ? ' → ' + i.ref : ''}${i.target ? ' → ' + i.target : ''}`),
-        ...fixes,
+        ...issues.map((i) => `[${i.fixClass}|${i.kind}] ${i.host ? i.host + '/' : ''}${i.skill}${i.ref ? ' → ' + i.ref : ''}${i.target ? ' → ' + i.target : ''}`),
+        ...fixes.length ? ['—— 已自动修复 ——', ...fixes] : [],
     ]
-    return { fresh, issues, fixes, thirdParty: det.thirdParty, repo: det.repo, summary }
+    if (!args.fix && autoLeft.length) summary.push(`💡 ${autoLeft.length} 项可一键自动修：运行 repair`)
+    if (confirmLeft.length) summary.push(`⚠️ ${confirmLeft.length} 项需确认后清理：repair --prune / --prune-stale-claude（破坏性，先告知用户）`)
+    if (guidedLeft.length) summary.push(`🛠 ${guidedLeft.length} 项需人工/改仓库：${[...new Set(guidedLeft.map((i) => i.kind))].join(', ')}`)
+
+    return { fresh, issues, fixes, installForm: det.installForm, autoFixable: autoLeft.length, repo: det.repo, thirdParty: det.thirdParty, summary }
 }
 
 // ---------- 插件自举（bootstrap）----------
@@ -695,10 +782,11 @@ function main() {
     if (cmd === 'detect') out = detect()
     else if (cmd === 'install') out = install(args)
     else if (cmd === 'doctor') out = doctor(args)
+    else if (cmd === 'repair') out = doctor({ ...args, fix: true })
     else if (cmd === 'update') out = update(args)
     else if (cmd === 'bootstrap') out = bootstrap()
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--fix] [--pull] [--no-pull]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)
