@@ -7,7 +7,7 @@
     {
       "name": "tvs-inksnow",
       "description": "一套工具中性的 skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆系统等。",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": { "name": "inksnowhailong" },
       "source": "./",
       "category": "productivity",
@@ -15,5 +15,5 @@
       "tags": ["skills", "tasks", "architecture", "code-review", "memory"]
     }
   ],
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
