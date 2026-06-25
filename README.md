@@ -7,8 +7,11 @@
 
 ## 安装
 
-> ⚠️ 关键：软链安装要求**仓库常驻在一个固定位置**。请把仓库克隆到 `~/ai-tools-skills`（家目录下），
-> **不要放临时目录或某个项目目录里**——否则该目录一删/一换，安装出的软链就全断（会看到指向别人机器的怪路径）。
+> 选哪种安装？**Claude Code 用户首选方式零（原生插件）**，无需 clone/node、自动更新、自带自举。
+> Cursor/Codex/Cline 用户走方式一/二（默认 copy 拷贝安装，独立副本、无路径依赖）。
+>
+> ⚠️ 仅当你用 `--mode link` **软链安装**（作者本地开发态）时，才要求仓库常驻固定位置：请克隆到
+> `~/ai-tools-skills`（家目录下），**别放临时目录或某个项目里**——否则该目录一删/一换软链全断（会看到指向别人机器的怪路径）。插件与 copy 安装无此约束。
 
 ### 方式零：Claude Code 插件（CC 用户首选）
 
@@ -20,6 +23,8 @@ Claude Code 用户直接走原生插件，无需 clone/node，安装后自动更
 ```
 
 装完重启会话即可用全部 skill。Cursor/Codex/Cline 用户走下面的方式一/二。
+
+> 自动自举：插件自带 SessionStart 钩子，首次安装（或插件升级）后会在会话开头提示 AI 跑一次 `tvs-setup bootstrap`——它静默把 `skillListingBudgetFraction` 归一到 `0.02`，并按"激进全自动"原则处理依赖：`oh-my-claudecode`（npm）、`codegraph`（npx）征得同意后直接装，`superpowers`（纯插件）打印 `/plugin` 命令交你手点。装好后写 marker，不再重复提示。
 
 > 命名说明：`add` 后面 `inksnowhailong/ai-tools-skills` 是 **GitHub 仓库坐标**（CC 去这里 clone）；`install` 的 `tvs-inksnow@tvs-inksnow` 是 **插件名@市场名**——本插件这两者都叫 `tvs-inksnow`，所以 `@` 前后一样。三者分属仓库/插件/市场不同命名系统，仓库名与它们不同是正常的。
 
