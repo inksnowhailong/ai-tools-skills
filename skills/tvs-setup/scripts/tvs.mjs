@@ -580,6 +580,74 @@ function doctor(args) {
     return { fresh, issues, fixes, thirdParty: det.thirdParty, repo: det.repo, summary }
 }
 
+// ---------- 插件自举（bootstrap）----------
+//
+// 插件消费者首次安装 tvs-inksnow 后，SessionStart 钩子会提示 AI 调本命令。
+// 它只做「确定性配置」：归一预算键 + 写 marker；依赖安装由 AI 解读输出后执行
+// （可脚本化的 omc/codegraph 征得同意直接跑，纯插件的 superpowers 打印 /plugin 命令）。
+
+const markerPath = () => join(homedir(), '.claude', '.tvs-inksnow', 'bootstrap.json')
+
+/** 静默把 skillListingBudgetFraction 归一到目标值（仅触碰这一个键，其余原样保序回写） */
+function setBudgetFraction(value = 0.02) {
+    if (!existsSync(join(homedir(), '.claude'))) return { ok: false, reason: '未发现 ~/.claude，跳过预算设置' }
+    const sp = settingsPath()
+    let cfg = {}
+    if (existsSync(sp)) {
+        try { cfg = JSON.parse(readFileSync(sp, 'utf8')) }
+        catch (e) { return { ok: false, reason: `settings.json 解析失败（${e.message}），拒绝改写以免破坏配置` } }
+    }
+    const cur = cfg.skillListingBudgetFraction
+    if (cur === value) return { ok: true, changed: false, value }
+    cfg.skillListingBudgetFraction = value
+    writeFileSync(sp, JSON.stringify(cfg, null, 2) + '\n')
+    return { ok: true, changed: true, from: cur ?? null, value }
+}
+
+/** 写自举 marker（记录已自举的插件版本，供 SessionStart 钩子比对决定是否再提示） */
+function writeMarker(version) {
+    const p = markerPath()
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, JSON.stringify({ version, bootstrappedAt: new Date().toISOString() }, null, 2) + '\n')
+    return norm(p)
+}
+
+/** 读当前插件版本（.claude-plugin/plugin.json），读不到返回 null */
+function pluginVersion() {
+    try { return JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version || null }
+    catch { return null }
+}
+
+/** 一次性自举：归一预算 + 分类依赖 + 写 marker。返回供 AI 执行后续安装的计划 JSON */
+function bootstrap() {
+    const budget = setBudgetFraction(0.02)
+    const tp = detectThirdParty()
+    // 依赖分类：auto=可脚本化（AI 征得同意后直接跑）；否则纯插件，打印命令交用户手动
+    const deps = {
+        omc: { installed: tp.omc.installed, kind: 'npm', auto: true,
+            cmd: 'npm i -g oh-my-claudecode && omc setup', why: tp.omc.why },
+        codegraph: { installed: tp.codegraph.installed, kind: 'npx', auto: true,
+            cmd: 'npx @colbymchenry/codegraph',
+            note: '装好后按项目运行 codegraph init -i 建索引（交互式，由用户执行）', why: tp.codegraph.why },
+        superpowers: { installed: tp.superpowers.installed, kind: 'plugin', auto: false,
+            cmd: '/plugin marketplace add obra/superpowers-marketplace 然后 /plugin install superpowers',
+            why: tp.superpowers.why },
+    }
+    const ver = pluginVersion()
+    const marker = ver ? writeMarker(ver) : null
+    const missingAuto = Object.entries(deps).filter(([, d]) => !d.installed && d.auto).map(([k]) => k)
+    const missingManual = Object.entries(deps).filter(([, d]) => !d.installed && !d.auto).map(([k]) => k)
+    const summary = [
+        budget.ok
+            ? (budget.changed ? `已设 skillListingBudgetFraction=0.02（原 ${budget.from ?? '未设'}）` : 'skillListingBudgetFraction 已是 0.02')
+            : `预算未设：${budget.reason}`,
+        missingAuto.length ? `待自动安装（征得同意后 AI 直接跑）：${missingAuto.join(', ')}` : '可脚本化依赖齐全',
+        missingManual.length ? `需手动 /plugin 安装：${missingManual.join(', ')}` : '插件类依赖齐全',
+        marker ? `已写 bootstrap marker（v${ver}）→ ${marker}` : 'marker 未写（读不到插件版本）',
+    ]
+    return { budget, deps, missingAuto, missingManual, marker, pluginVersion: ver, summary }
+}
+
 // ---------- CLI ----------
 
 function parseArgs(argv) {
@@ -628,8 +696,9 @@ function main() {
     else if (cmd === 'install') out = install(args)
     else if (cmd === 'doctor') out = doctor(args)
     else if (cmd === 'update') out = update(args)
+    else if (cmd === 'bootstrap') out = bootstrap()
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|update> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--fix] [--pull] [--no-pull]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--fix] [--pull] [--no-pull]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)

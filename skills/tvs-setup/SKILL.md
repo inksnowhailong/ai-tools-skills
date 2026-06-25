@@ -22,6 +22,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 | `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主 |
 | `doctor [--fix]` | detect 全部内容 + 死脚本引用扫描 + frontmatter lint + README 同步检查 + HUD 接管链路检查；`--fix` 自动修复漂移拷贝、断链与 HUD 接管 |
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
+| `bootstrap` | 插件消费者一次性自举：静默归一 `skillListingBudgetFraction=0.02` + 写 marker + 输出依赖安装计划（见下节"插件自举"）。由 SessionStart 钩子自动提示触发 |
 
 ## 四种使用场景
 
@@ -80,6 +81,19 @@ tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路，缺一�
 - `doctor --fix`：把仓库的 combined-status.mjs 拷到 `~/.claude/hud/`（始终拷贝、独立于 skill 软链，卸载 tvs-hud 不会让状态栏报错），并改写 statusLine 指向它、补 `--omc-hud`（沿用现有 node 路径，仅当首 token 像 node 时；否则回退当前 node）。
 - `install` 装了 tvs-hud 且目标含 claude 时，自动执行同样的接管。
 - **复发点**：跑 `/oh-my-claudecode:hud setup` 会把 statusLine 改回纯 omc，tvs 三行随之消失——再 `doctor --fix` 即可恢复。
+
+## 插件自举（bootstrap，仅 Claude Code 插件消费者）
+
+用户用 `/plugin install tvs-inksnow` 装了插件后，插件自带的 SessionStart 钩子（`hooks/hooks.json` → `bootstrap-check.mjs`）会探测 marker（`~/.claude/.tvs-inksnow/bootstrap.json`）：未自举或插件升级时，向会话注入提示，要你（AI）跑一次自举。流程：
+
+1. 跑 `node "${CLAUDE_PLUGIN_ROOT}/skills/tvs-setup/scripts/tvs.mjs" bootstrap`，解读返回 JSON。
+2. 脚本已**确定性**完成两件事：静默把 `skillListingBudgetFraction` 归一到 `0.02`（仅这一个键，保序回写）、写 marker（之后不再提示，除非插件升级）。
+3. 依赖按 `deps` 分类处理——**激进全自动**原则：
+   - `auto:true`（omc 走 npm、codegraph 走 npx）：缺失时**征得用户同意后直接代跑** `cmd`（`npm i -g oh-my-claudecode && omc setup` / `npx @colbymchenry/codegraph`）。codegraph 的 `codegraph init -i` 是按项目交互建索引，留给用户。
+   - `auto:false`（superpowers 纯插件）：脚本和 AI 都跑不了 `/plugin`，把 `cmd` 打印给用户手动执行。
+4. `missingAuto` / `missingManual` 直接告诉你还差哪些、各自怎么补。
+
+> 为什么钩子只"提示"不"直接改"：插件在别人机器上静默改 settings.json / 装全局 npm 太冒犯，所以确定性配置由脚本做、安装动作由 AI 带着用户确认来跑，全程可见。
 
 ## 与 tvs-cc-migrator 的边界
 
