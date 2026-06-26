@@ -1,3 +1,9 @@
+---
+name: coding-rules
+description: 编码风格、注释规范、Tailwind/UnoCSS 样式与 data-alt 规范
+default: on
+---
+
 # 编写规则
 
 ## 核心原则

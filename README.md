@@ -190,11 +190,16 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 ## Rules
 
-| 文件 | 说明 |
-|---|---|
-| `role.md` | AI 助手角色定位、交付方式、代码质量意识与颜文字风格 |
-| `coding-rules.md` | 编码风格、TypeScript 约定、注释规范、Tailwind/UnoCSS 样式规则、`data-alt` 规范 |
-| `fontFace.json` | 字体相关配置数据（按需查阅） |
+个人规则注入 Claude Code 全局 `~/.claude/CLAUDE.md` 的托管段，安装时**可按需勾选**哪些启用。每条规则靠自身 frontmatter（`name` / `description` / `default: on|off`）自注册——往 `rules/` 丢个新 `.md` 即可在安装时被勾选，无需维护清单。`default: on` 默认装，`default: off` 可选默认不装。
+
+| 文件 | default | 说明 |
+|---|---|---|
+| `role.md` | on | AI 助手角色定位、交付方式、代码质量意识与颜文字风格 |
+| `coding-rules.md` | on | 编码风格、TypeScript 约定、注释规范、Tailwind/UnoCSS 样式规则、`data-alt` 规范 |
+| `feedback-loop.md` | off | 派活反馈——任务有摩擦时给一句改写范本，持续训练用户内化更好的指令 |
+| `fontFace.json` | — | 字体相关配置数据（按需查阅，非规则、不注入） |
+
+> 选择由 `tvs-setup` 在安装/修复时询问，落到 `tvs.mjs install --rules ...`；安装会幂等重写托管段，规则文件漂移由 `doctor`/`repair` 自动同步。
 
 ---
 

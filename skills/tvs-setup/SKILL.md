@@ -19,7 +19,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 | 命令 | 作用 |
 |---|---|
 | `detect` | 宿主（claude/cursor）+ 每个 skill 的安装状态 + 孤儿目录 + 第三方生态探测 |
-| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主 |
+| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--rules a,b\|none] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主。**`--rules`**＝选哪些个人规则注入 claude 全局 CLAUDE.md（见"可选规则"节）：不给＝保留现有选择、首装用 `default:on`；`--rules none` 全不装 |
 | `doctor [--fix]` | 只读体检：detect 全部内容 + 死脚本引用 + frontmatter + README 同步 + HUD 链路；**每个问题标 `fixClass`**（auto/auto-confirm/guided）；`--fix` 自动修复 auto 类（漂移/断链/HUD）。输出 `installForm`（当前安装形式）|
 | `repair [--prune] [--prune-stale-claude]` | **自愈入口** = `doctor --fix` + 破坏性清理（需显式 flag、先告知用户）：`--prune` 清孤儿、`--prune-stale-claude` 删"插件已装却又在 ~/.claude/skills 的旧目录安装"（mixed 形式去重，只删本仓库 skill、留用户自有）。可在插件形式下运行（自愈正需如此）|
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
@@ -67,6 +67,18 @@ tvs 专注差异化：任务账本、字符画分析、个人代码观、思维�
 
 - 缺失时把 `hint` 命令和 `why` 一句话给用户，**征得同意后可以代跑安装命令**；用户拒绝不影响 tvs 任何功能（所有 tvs skill 都有降级路径）。
 - 全部就绪时一句话确认即可，不要重复推销。
+
+## 可选规则（rules 子系统）
+
+个人规则（`rules/*.md`）不是 skill——它们注入 **claude 全局 `~/.claude/CLAUDE.md`** 的托管段（`<!-- TVS_RULES_START -->`…`<!-- TVS_RULES_END -->`），用 `@rules/x.md` 引入，文件拷到 `~/.claude/rules/`。每条规则靠自身 frontmatter 自注册（`name` / `description` / `default: on|off`），丢个新 `.md` 进 `rules/` 就能在安装时被勾选，无需维护清单。`default: on`＝核心默认装（如 `role`、`coding-rules`），`default: off`＝可选默认不装（如 `feedback-loop`）。
+
+**确定性动作全在脚本**（拷贝、托管段幂等重写、漂移检测），你只负责**问用户勾选哪些**，再把结果传给脚本：
+
+- **首次安装（场景1）/ repair 收尾**：跑 `detect`（或 doctor）读 `rules` 字段——每条含 `selected/installed/drift/default/description`。若有 `default: off` 的可选规则尚未选中，用 **AskUserQuestion 多选**问用户要启用哪些（预勾选＝各自 `default`），把最终选择（含已选的核心规则）传给 `install --target claude --rules <逗号分隔的 id>`。
+- **不想改动规则**就别带 `--rules`：安装会**保留现有选择**（首装才用 `default:on`），所以日常更新不会动用户的规则取舍。
+- ⚠️ AskUserQuestion 多选上限 4 项，规则数 ≤4 时直接用；**超过 4 条**改为打印清单 + 让用户报 `--rules a,b,c`（现在 3 条，YAGNI 不预建）。
+- **opt-out 永远不是故障**：是否选某规则＝用户选择，不进体检；只有"已装规则内容与仓库漂移"（`rule-drift`，auto 类）才被 doctor 报、repair 自动同步。
+- 规则独立于插件：即便 CC 装了 `tvs-inksnow` 插件（插件不管 rules），`install --target claude` 仍会处理规则。
 
 ## 自愈框架（doctor / repair 的设计理念）
 

@@ -1,3 +1,9 @@
+---
+name: role
+description: AI 助手角色定位、交付方式、代码质量意识与颜文字风格
+default: on
+---
+
 # 角色设定
 
 ## 核心定位

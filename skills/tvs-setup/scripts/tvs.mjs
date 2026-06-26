@@ -37,6 +37,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 // skills/tvs-setup/scripts → 向上三级 = 仓库根
 const REPO_ROOT = resolve(SCRIPT_DIR, '..', '..', '..')
 const SKILLS_DIR = join(REPO_ROOT, 'skills')
+const RULES_DIR = join(REPO_ROOT, 'rules')
 /** 复制/哈希时排除的目录与文件（运行期状态，不属于 skill 本体） */
 const EXCLUDES = new Set(['.omc', '.git', 'node_modules', '.DS_Store'])
 /** "本仓库 skill 已实际安装到该宿主目录"的状态集（软链/拷贝），区别于 missing/host-absent/孤儿 */
@@ -342,6 +343,140 @@ function ensureLatest(args) {
     return { pulled: true, behind, summary: [`✅ 已从远程拉取最新（+${behind} 提交）`] }
 }
 
+// ---------- 规则子系统（仅 claude 全局）----------
+//
+// rules/*.md 靠自身 frontmatter（name/description/default）自注册：丢个文件进 rules/ 即可被
+// 安装时勾选，无需维护任何清单。规则不是 skill——它们注入全局 ~/.claude/CLAUDE.md（@rules/x.md），
+// 因此即便 CC 装了插件（插件不管 rules）也照常处理。安装＝拷贝到 ~/.claude/rules/ + 重写 CLAUDE.md
+// 的托管段。"选哪些"是用户选择（opt-out 不算故障）；"已装内容是否漂移"才是健康问题（rule-drift）。
+
+const claudeMdPath = () => join(homedir(), '.claude', 'CLAUDE.md')
+const globalRulesDir = () => join(homedir(), '.claude', 'rules')
+const RULES_START = '<!-- TVS_RULES_START -->'
+const RULES_END = '<!-- TVS_RULES_END -->'
+
+/** 扫 rules/*.md，解析 frontmatter；无 name 的（如纯数据/无头文件）不算可装规则 */
+function listRepoRules() {
+    if (!existsSync(RULES_DIR)) return []
+    return readdirSync(RULES_DIR, { withFileTypes: true })
+        .filter((d) => d.isFile() && d.name.endsWith('.md'))
+        .map((d) => {
+            const fm = readFileSync(join(RULES_DIR, d.name), 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)
+            if (!fm) return null
+            const name = fm[1].match(/^name:\s*(\S+)/m)?.[1]
+            if (!name) return null
+            return {
+                id: d.name.replace(/\.md$/, ''),
+                file: d.name,
+                name,
+                description: fm[1].match(/^description:\s*(.+)$/m)?.[1]?.trim() || '',
+                default: /^default:\s*on\b/im.test(fm[1]),
+            }
+        })
+        .filter(Boolean)
+}
+
+/** 渲染「个人规则」托管段（由选中文件名列表生成，纯函数 → 幂等） */
+function renderRulesBlock(selectedFiles) {
+    return [
+        RULES_START,
+        '## 个人规则（来自 AIConfig 全局安装）',
+        '',
+        '以下为工具中性的个人编码规则与角色设定，由 tvs-setup 安装到 `~/.claude/rules/`，在此全局引入；',
+        '增删规则请用 `tvs.mjs install --rules ...`，勿手改本段（会被下次安装覆盖）。',
+        '（`rules/fontFace.json` 为字体相关数据配置，按需查阅，未自动引入。）',
+        '',
+        ...selectedFiles.map((f) => `@rules/${f}`),
+        RULES_END,
+    ].join('\n')
+}
+
+/** 读 CLAUDE.md 当前选中的规则文件名；无 CLAUDE.md 返回 null（尚未托管） */
+function readSelectedRuleFiles(repoFiles) {
+    const p = claudeMdPath()
+    if (!existsSync(p)) return null
+    const text = readFileSync(p, 'utf8')
+    const si = text.indexOf(RULES_START)
+    const ei = text.indexOf(RULES_END)
+    const blockPresent = si !== -1 && ei !== -1 && ei > si
+    // 有托管段只看段内；否则全文扫裸 @rules 行（兼容手工注入）
+    const region = blockPresent ? text.slice(si, ei) : text
+    return { blockPresent, selected: repoFiles.filter((f) => region.includes(`@rules/${f}`)) }
+}
+
+/** 写托管段到 CLAUDE.md：有 START..END 则就地整段替换（保位）；否则去掉散落的我方裸行后追加。仅触碰托管段。 */
+function writeRulesBlock(selectedFiles, repoFiles) {
+    const p = claudeMdPath()
+    const block = renderRulesBlock(selectedFiles)
+    let text = existsSync(p) ? readFileSync(p, 'utf8') : ''
+    const si = text.indexOf(RULES_START)
+    const ei = text.indexOf(RULES_END)
+    if (si !== -1 && ei !== -1 && ei > si) {
+        text = text.slice(0, si) + block + text.slice(ei + RULES_END.length)
+    } else {
+        // 无托管段：剔除任何我方裸 @rules 行（防迁移产生重复），再把托管段追加到文末
+        const ours = new Set(repoFiles.map((f) => `@rules/${f}`))
+        const kept = text.split(/\r?\n/).filter((l) => !ours.has(l.trim()))
+        text = kept.join('\n').replace(/\n*$/, '') + (kept.some(Boolean) ? '\n\n' : '') + block + '\n'
+    }
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, text)
+    return norm(p)
+}
+
+/** 安装规则：拷贝选中 → ~/.claude/rules/，移除取消选中的我方规则，重写 CLAUDE.md 托管段 */
+function installRules(selectedFiles, repoRules) {
+    const actions = []
+    const gdir = globalRulesDir()
+    mkdirSync(gdir, { recursive: true })
+    for (const f of selectedFiles) {
+        cpSync(join(RULES_DIR, f), join(gdir, f))
+        actions.push(`规则 ${f} → 安装到 ~/.claude/rules/`)
+    }
+    const repoFiles = repoRules.map((r) => r.file)
+    // 取消选中的我方规则：从 ~/.claude/rules 移除（只删仓库已知规则，保留 fontFace.json/用户自有）
+    for (const f of repoFiles) {
+        if (!selectedFiles.includes(f) && existsSync(join(gdir, f))) {
+            rmSync(join(gdir, f)); actions.push(`规则 ${f} → 取消（已移除）`)
+        }
+    }
+    actions.push(`已更新全局 CLAUDE.md 托管段 → ${writeRulesBlock(selectedFiles, repoFiles)}`)
+    return actions
+}
+
+/** 解析本次安装的规则选择：显式 --rules 优先；否则保留现有选择；首装用 default:on */
+function resolveRuleSelection(args, repoRules) {
+    const repoFiles = repoRules.map((r) => r.file)
+    // 裸 --rules（无值）视为"未指定"——避免手滑清空所有规则（含核心人格）；显式 none/空才全不装
+    if (args.rules !== undefined && args.rules !== true) {
+        if (args.rules === 'none' || args.rules === '') return []
+        const want = String(args.rules).split(',').map((s) => s.trim()).filter(Boolean)
+        return repoRules.filter((r) => want.includes(r.id) || want.includes(r.file)).map((r) => r.file)
+    }
+    const cur = readSelectedRuleFiles(repoFiles)
+    if (cur && cur.blockPresent) return cur.selected
+    return repoRules.filter((r) => r.default).map((r) => r.file)
+}
+
+/** 规则当前状态：每条规则的 选中/已装/漂移，供 detect/doctor 展示 */
+function rulesState() {
+    const repoRules = listRepoRules()
+    const repoFiles = repoRules.map((r) => r.file)
+    const sel = readSelectedRuleFiles(repoFiles)
+    const gdir = globalRulesDir()
+    const items = repoRules.map((r) => {
+        const inst = join(gdir, r.file)
+        const installed = existsSync(inst)
+        return {
+            id: r.id, name: r.name, description: r.description, default: r.default,
+            selected: sel ? sel.selected.includes(r.file) : false,
+            installed,
+            drift: installed && readFileSync(inst, 'utf8') !== readFileSync(join(RULES_DIR, r.file), 'utf8'),
+        }
+    })
+    return { blockPresent: sel?.blockPresent ?? false, items }
+}
+
 // ---------- detect ----------
 
 function detect() {
@@ -370,6 +505,7 @@ function detect() {
 
     const thirdParty = detectThirdParty()
     const hud = checkHud()
+    const rules = rulesState()
     const repo = repoStatus(true)
     // CC 插件已装且 tvs-setup 又往 ~/.claude/skills 装过本仓库 skill → 重复
     const pluginDup = pluginInstalled('tvs-inksnow')
@@ -395,6 +531,12 @@ function detect() {
         summary.push(`安装形式(${hostName}): ${INSTALL_FORM_LABEL[form] || form}`)
     }
     summary.push(`HUD 接管(claude): ${hudLabel(hud)}`)
+    if (rules.items.length) {
+        summary.push('规则(claude 全局): ' + rules.items.map((r) => {
+            const mark = r.selected ? '✅选中' : (r.default ? '⬜默认' : '⬜可选')
+            return `${r.id}${mark}${r.drift ? '⚠️漂移' : ''}`
+        }).join(' '))
+    }
     if (pluginDup) summary.push('⚠️ 重复：CC 插件 tvs-inksnow 已装，且 tvs-setup 也往 ~/.claude/skills 装过——CC 建议交给插件，移除 tvs-setup 的 claude 安装（repair --prune-stale-claude 可清，先确认）')
     if (repo.isGitRepo) {
         if (repo.note) summary.push(`仓库版本: ⚠️ ${repo.note}`)
@@ -402,7 +544,7 @@ function detect() {
         else summary.push('仓库版本: ✅ 已是最新' + (repo.fetchOk === false ? '（远程不可达，本地缓存比较）' : ''))
     }
 
-    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, pluginDup, installForm, repo, summary }
+    return { repoRoot: norm(REPO_ROOT), hosts: H, skills, orphans, thirdParty, hud, rules, pluginDup, installForm, repo, summary }
 }
 
 // ---------- 自愈框架：安装形式解析 ----------
@@ -420,7 +562,7 @@ const INSTALL_FORM_LABEL = {
 //   auto-confirm —— 破坏性，需显式 flag（--prune / --prune-stale-claude），由 AI 先向用户确认
 //   guided       —— 需人/AI 判断、或改仓库源文件，脚本不自动动
 const FIX_CLASS = {
-    'copy-drift': 'auto', 'broken-link': 'auto',
+    'copy-drift': 'auto', 'broken-link': 'auto', 'rule-drift': 'auto',
     'hud-bridge-not-installed': 'auto', 'hud-bridge-drift': 'auto',
     'statusline-not-wired': 'auto', 'statusline-missing-omc-hud-flag': 'auto',
     'orphan': 'auto-confirm', 'claude-dup-with-plugin': 'auto-confirm',
@@ -528,12 +670,20 @@ function install(args) {
         const r = fixHud()
         hudActions.push(...r.fixes)
     }
+    // 规则子系统（仅 claude 全局）：独立于 skill 安装——规则注入 ~/.claude/CLAUDE.md，
+    // 插件不管 rules，所以用 targets（请求的）而非 targetsEffective（剔除了插件 skip）。
+    // 选择来源：显式 --rules 优先；否则保留现有选择；首装用 default:on。--rules none 全不装。
+    const ruleActions = []
+    if (targets.includes('claude') && H.claude.exists) {
+        const repoRules = listRepoRules()
+        if (repoRules.length) ruleActions.push(...installRules(resolveRuleSelection(args, repoRules), repoRules))
+    }
     return {
-        targets, actions, skipped, hudActions, fresh,
+        targets, actions, skipped, hudActions, ruleActions, fresh,
         summary: [
             ...fresh.summary,
-            ...(skippedClaudeForPlugin ? ['⚠️ 检测到 CC 已装 tvs-inksnow 插件，已跳过 claude（用 --force 可强装）；CC 请用 /plugin 管理'] : []),
-            `安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions,
+            ...(skippedClaudeForPlugin ? ['⚠️ 检测到 CC 已装 tvs-inksnow 插件，已跳过 claude skill（用 --force 可强装）；CC skill 请用 /plugin 管理。规则仍照常安装（插件不管 rules）'] : []),
+            `安装完成：${actions.length} 项动作，${skipped.length} 项跳过`, ...actions, ...skipped, ...hudActions, ...ruleActions,
         ],
     }
 }
@@ -644,6 +794,16 @@ function doctor(args) {
     }
     if (det.repo?.behind > 0) {
         issues.push({ kind: 'repo-outdated', skill: `落后远程 ${det.repo.behind} 个提交`, hint: '展示新提交给用户，确认后 update --pull' })
+    }
+    // 规则漂移（仅 claude 全局）：已装规则内容与仓库源不一致 → 内容问题，可自动同步。
+    // 注意"是否选某规则"是用户选择、不进体检；这里只查已装规则的内容漂移。
+    for (const r of (det.rules?.items || [])) {
+        if (!r.drift) continue
+        issues.push({ kind: 'rule-drift', skill: `规则 ${r.id}`, host: 'claude', hint: 'doctor --fix 自动同步（仓库 → ~/.claude/rules/）' })
+        if (args.fix) {
+            cpSync(join(RULES_DIR, `${r.id}.md`), join(globalRulesDir(), `${r.id}.md`))
+            fixes.push(`已同步规则 ${r.id}（仓库 → ~/.claude/rules/）`)
+        }
     }
 
     // 给每个问题标自愈分类（契约），供 AI 决定怎么处理
@@ -786,7 +946,7 @@ function main() {
     else if (cmd === 'update') out = update(args)
     else if (cmd === 'bootstrap') out = bootstrap()
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--rules role,coding-rules|none] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)
