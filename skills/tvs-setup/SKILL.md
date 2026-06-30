@@ -1,6 +1,6 @@
 ---
 name: tvs-setup
-description: 当用户说"安装/更新 tvs skill、tvs setup、体检一下 skill、doctor、检查 skill 安装状态、装到新机器、skill 同步了吗、有没有漂移、清理旧 skill"时使用。作用：调用随包 scripts/tvs.mjs（detect/install/doctor）完成本仓库 skills 的安装（软链优先）、更新与体检（漂移/死引用/frontmatter/孤儿/断链），并探测 omc、superpowers、codegraph 生态增强是否就绪，缺失时给出官方安装建议——tvs 专注差异化能力，重叠能力推荐生态最强者补足。
+description: 当用户说"安装/更新 tvs skill、tvs setup、体检一下 skill、doctor、检查 skill 安装状态、装到新机器、skill 同步了吗、有没有漂移、清理旧 skill、启用/开启某条规则、调整规则、打开反哺、feedback-loop"时使用。作用：调用随包 scripts/tvs.mjs（detect/install/doctor）完成本仓库 skills 的安装（软链优先）、更新与体检（漂移/死引用/frontmatter/孤儿/断链），并探测 omc、superpowers、codegraph 生态增强是否就绪，缺失时给出官方安装建议——tvs 专注差异化能力，重叠能力推荐生态最强者补足。
 disable-model-invocation: true
 ---
 
@@ -31,7 +31,8 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 
 1. 跑 `detect`，把 summary 给用户看（哪个宿主、当前状态、第三方生态缺什么）。
 2. 确认目标宿主后跑 `install`（默认 copy——独立拷贝、永远从远程拉最新、无 clone 常驻依赖/绝对路径泄漏。你自己开发本仓库时加 `--mode link` 改即生效）。
-3. 按下面"生态增强建议"一节处理第三方推荐。
+3. **【必经步骤·规则勾选】** 读 detect 的 `rules` 字段：只要存在 `default:off 且未选中` 的可选规则（summary 里那行 `💡 可选规则未启用`），就**必须**用 AskUserQuestion 多选问用户启用哪些（详见"可选规则"节），不能跳过。用户全不选也行——但要主动问，别让可选规则隐形。
+4. 按下面"生态增强建议"一节处理第三方推荐。
 
 ### 2. 日常体检（"体检一下 / skill 同步了吗"）
 
@@ -68,7 +69,15 @@ tvs 专注差异化：任务账本、字符画分析、个人代码观、思维�
 - 缺失时把 `hint` 命令和 `why` 一句话给用户，**征得同意后可以代跑安装命令**；用户拒绝不影响 tvs 任何功能（所有 tvs skill 都有降级路径）。
 - 全部就绪时一句话确认即可，不要重复推销。
 
-## 可选规则（rules 子系统）
+### 5. 调整规则开关（"开启 feedback-loop / 调整规则 / 打开反哺 / 关掉某条规则"）
+
+用户想单独开/关某条规则时（不是整体重装），标准三步——**不要让用户自己背 `--rules` 全量覆盖语义**：
+
+1. 跑 `detect`，读 `rules.items`（每条带 `id/selected/installed/default/drift/description`）。
+2. 用 **AskUserQuestion 多选**列出全部规则，**预勾选＝当前 `selected`**，让用户增删。
+3. 把用户最终勾选的**全集**传给 `install --target claude --rules <逗号分隔 id>`。
+   - ⚠️ `--rules` 是**全量覆盖**：没列进去的会被移除。所以必须带上用户仍要保留的核心规则（role、coding-rules），漏写会误删人格。AskUserQuestion 预勾选就是为了防这个。
+   - 用户想"全关"才传 `--rules none`。
 
 个人规则（`rules/*.md`）不是 skill——它们注入 **claude 全局 `~/.claude/CLAUDE.md`** 的托管段（`<!-- TVS_RULES_START -->`…`<!-- TVS_RULES_END -->`），用 `@rules/x.md` 引入，文件拷到 `~/.claude/rules/`。每条规则靠自身 frontmatter 自注册（`name` / `description` / `default: on|off`），丢个新 `.md` 进 `rules/` 就能在安装时被勾选，无需维护清单。`default: on`＝核心默认装（如 `role`、`coding-rules`），`default: off`＝可选默认不装（如 `feedback-loop`）。
 

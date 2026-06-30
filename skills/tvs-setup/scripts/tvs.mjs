@@ -536,6 +536,12 @@ function detect() {
             const mark = r.selected ? '✅选中' : (r.default ? '⬜默认' : '⬜可选')
             return `${r.id}${mark}${r.drift ? '⚠️漂移' : ''}`
         }).join(' '))
+        // 可选规则（default:off）未启用时主动招呼——否则它永远隐形、用户忘了能开
+        const offUnsel = rules.items.filter((r) => !r.default && !r.selected)
+        if (offUnsel.length) {
+            summary.push('💡 可选规则未启用：' + offUnsel.map((r) => `${r.id}（${r.description}）`).join('、')
+                + ' —— 安装时可勾选开启（install --target claude --rules ...）')
+        }
     }
     if (pluginDup) summary.push('⚠️ 重复：CC 插件 tvs-inksnow 已装，且 tvs-setup 也往 ~/.claude/skills 装过——CC 建议交给插件，移除 tvs-setup 的 claude 安装（repair --prune-stale-claude 可清，先确认）')
     if (repo.isGitRepo) {
