@@ -17,20 +17,19 @@ function tierColor(n, warn, danger, safe) {
   return n >= danger ? C.RED : n >= warn ? C.ORANGE : n <= safe ? C.GREEN : C.GRAY;
 }
 
-// ctx 用进度条取代纯文字百分比——一眼看出"还剩多少余量"，比读数字直观（参照官方文档的多行示例）。
+// ctx 带标签 + 进度条——一眼看出"还剩多少余量"，比读数字直观（参照官方文档的多行示例）。
 function ctxBar(n, width = 10) {
   if (n == null) return null;
   const filled = Math.max(0, Math.min(width, Math.round((n / 100) * width)));
   const bar = '▓'.repeat(filled) + '░'.repeat(width - filled);
-  return `${tierColor(n, 70, 85, 40)}[${bar}]${n}%${C.R}`;
+  return `ctx${tierColor(n, 70, 85, 40)}[${bar}]${n}%${C.R}`;
 }
 
-// 5h + 周配额合并成一个紧凑块：5h90/周90%，每个数字各自按阈值上色，尾部共用一个 %。
-function quotaBlock(fiveHourPercent, weeklyPercent) {
-  const segs = [];
-  if (fiveHourPercent != null) segs.push(`5h${tierColor(fiveHourPercent, 60, 85, 30)}${fiveHourPercent}${C.R}`);
-  if (weeklyPercent != null) segs.push(`周${tierColor(weeklyPercent, 60, 85, 30)}${weeklyPercent}${C.R}`);
-  return segs.length ? segs.join('/') + '%' : null;
+// ctx / 5h / 周三个占比各自独立成段，不再拼进一个紧凑块——分开的标签+数值组合更好认，
+// 不会出现"5h43"这种看着像一个词、实际是"5h 配额 43%"的歧义。
+function pctSeg(label, n, warn, danger, safe) {
+  if (n == null) return null;
+  return `${label} ${tierColor(n, warn, danger, safe)}${n}%${C.R}`;
 }
 
 // effort 档位 → 颜色，越高越"热"：low/medium 冷静，high 起提醒，xhigh/max 最热烈
@@ -55,7 +54,7 @@ function pushToEdge(head, tail) {
 }
 
 /**
- * 行一：模型/effort + ctx 进度条 + 配额紧凑块（左侧，高优先级、常看的信息）
+ * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔）
  *      + tvs 版本（右侧行尾，低优先级、偶尔瞄一眼的信息）。
  * @param {{modelName:string|null, effortLevel:string|null, contextPercent:number|null, fiveHourPercent:number|null, weeklyPercent:number|null}} usage
  * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 插件版本检测结果，见 lib/version.mjs
@@ -70,8 +69,10 @@ export function usageLine(usage, update = null) {
   }
   const bar = ctxBar(usage.contextPercent);
   if (bar) head.push(bar);
-  const quota = quotaBlock(usage.fiveHourPercent, usage.weeklyPercent);
-  if (quota) head.push(quota);
+  const fiveHour = pctSeg('5h', usage.fiveHourPercent, 60, 85, 30);
+  if (fiveHour) head.push(fiveHour);
+  const weekly = pctSeg('周', usage.weeklyPercent, 60, 85, 30);
+  if (weekly) head.push(weekly);
 
   const tail = update?.active
     ? (update.hasUpdate
@@ -80,7 +81,7 @@ export function usageLine(usage, update = null) {
     : '';
 
   if (!head.length && !tail) return '';
-  const headStr = head.join('  ');
+  const headStr = head.join(`  ${C.GRAY}·${C.R}  `);
   return tail ? pushToEdge(headStr, tail) : headStr;
 }
 

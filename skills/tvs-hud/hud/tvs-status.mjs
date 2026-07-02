@@ -29,13 +29,15 @@ export function render(rawStdinText) {
   const usage = extractUsage(stdin);
   const cwd = usage.cwd || process.cwd();
 
-  const repo = isGitRepo(cwd)
-    ? cached(`repo:${cwd}`, () => ({
-        repoName: usage.repoName || repoRootName(cwd),
-        branch: branchOf(cwd),
-        git: gitOf(cwd),
-        worktrees: worktreesOf(cwd),
-      }))
+  // 只缓存真正费子进程的部分（是否在仓库内/分支/git状态/worktree/仓库根目录名兜底）；
+  // usage.repoName 来自当次 stdin、不进子进程、永远现取——否则会出现"缓存里存着上一次
+  // stdin 算出的 repoName，这一次 stdin 变了但还在读旧缓存"这种串味的 bug。
+  const gitInfo = cached(`repo:${cwd}`, () => {
+    if (!isGitRepo(cwd)) return null;
+    return { branch: branchOf(cwd), git: gitOf(cwd), worktrees: worktreesOf(cwd), rootName: repoRootName(cwd) };
+  });
+  const repo = gitInfo
+    ? { repoName: usage.repoName || gitInfo.rootName, branch: gitInfo.branch, git: gitInfo.git, worktrees: gitInfo.worktrees }
     : null;
 
   const activity = recentActivity(stdin?.transcript_path || null);
