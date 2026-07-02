@@ -1,97 +1,91 @@
 ---
 name: tvs-hud
-description: 状态栏 HUD 配置——三行多线索输出：雷达告警 / 按项目 git+任务 / 任务标题预览；自适应 tvs-boss/tvs-task 是否存在，都没有时静默。用户主动运行 /tvs-hud 来配置显示项。
+description: 状态栏 HUD——自包含渲染，不依赖 omc 的 HUD/IPC。两行：Claude 用量（模型/上下文占比/5小时·每周用量）+ 当前目录分支状态与情绪脸。cwd 在某个 git 仓库内才展示分支信息，情绪脸随时展示。用户主动运行 /tvs-hud 查看接管状态或重新接管。
 disable-model-invocation: true
 ---
 
 # tvs-hud：状态栏 HUD
 
-Claude Code 底部状态栏的 tvs 数据源，最多输出三行，自适应四种场景：
-
-- **tvs-boss + tvs-task**：雷达告警行 + 按项目分组 git/任务行 + 任务标题行
-- **仅 tvs-boss**：按项目显示 git 状态 + worktree
-- **仅 tvs-task**：汇总任务计数
-- **都没有**：静默不输出
+Claude Code 底部状态栏的 tvs 数据源，最多两行，**完全自包含，不再合并 omc 的 HUD 输出**（旧版靠"主进程 import + 拦截 stdout"拦截 omc HUD，已废弃）。
 
 ## 状态栏输出示例
 
 ```
-tvs-雷达 🚨6  │  shirehub_web ↑28 未合并  ·  crestrail ~1 未提交3天  ·  💤 tvs-task停5天  ·  ...
-tvs-boss     │  crestrail ~1 ⏳2  │  shirehub ✓ 🔥1  │  shirehub_web ~5↑28 🔥2 💤1  🌿feat/cdk ↓19
-tvs-tasks    │  🔥 ShireHub发帖页面  │  🔥 架构重构  │  💤 tvs-task优化  │  ⏳ 记忆工程  +2
+◆ Sonnet 5 · ctx 32% · 5h 18% · 周 3%
+⎇ main ~2↑1  🌿2   (-̀ω-́)✧ 笃定
 ```
+
+不在 git 仓库时第二行退化成纯情绪脸；Claude 用量哪项数据缺就跳过那项，不留占位符。
 
 ### 符号说明
 
-**Git 状态**
+**行一：Claude 用量**（读 Claude Code 原生喂给 statusLine 命令的 stdin JSON，非 omc 特有接口）
+
+| 字段 | 含义 |
+|------|------|
+| 模型名 | `stdin.model.display_name` |
+| `ctx N%` | 上下文窗口占用（`stdin.context_window.used_percentage`），≥70% 橙、≥85% 红 |
+| `5h N%` | 5 小时滚动用量（`stdin.rate_limits.five_hour`） |
+| `周 N%` | 7 天用量（`stdin.rate_limits.seven_day`） |
+
+**行二：当前目录 git + 情绪**
 
 | 符号 | 含义 |
 |------|------|
-| `~N` | N 个未提交文件（dirty） |
-| `↑N` | 领先远端 N 个提交（未合并） |
-| `↓N` | 落后远端 N 个提交（需 rebase） |
-| `✓` | 工作区干净 |
+| `⎇ branch` | 当前分支（cwd 落在任意 git 仓库内即显示，**不依赖 tvs-boss 的项目登记表**，纯 cwd 本仓库） |
+| `~N` `↑N` `↓N` | 脏文件 / 领先 / 落后远端；全干净显示 `✓` |
+| `🌿N` | 当前仓库有 N 个 worktree 存在脏改动或落后（数字徽标，不逐条展开——想看细节用 `/tvs-boss` 面板） |
+| `{颜文字} {标签}` | 情绪脸，见下 |
 
-**任务状态**
+## 情绪引擎（v1，不落盘）
 
-| 符号 | 含义 |
-|------|------|
-| `🔥N` | N 个进行中任务 |
-| `💤N` | N 个停滞任务（进行中 > 5 天未更新） |
-| `⏳N` | N 个待开始任务 |
+移植自 `E:\inksnow\Thoughts\docs\tvs情绪记忆HUD-skill设计文档.md` 设计的 PAD 三轴情绪机 + 颜文字脸池（源自「思绪」`core/mind.mjs` + `core/kaomoji.mjs`，纯函数零依赖）。
 
-任务行（`tvs-tasks`）中**当前所在项目的任务自动排到最前**，组内再按 进行中 → 停滞 → 待开始 排序。
+**v1 简化**：不接 hook 事件捕获管线，**每次渲染直接从 `transcript_path` 尾部窗口（最近 15 分钟）+ 当前 git 状态现算**：
 
-**Worktree**：`🌿feat/branch-name ↓19`，落后 ≥ 5 时出现在雷达。
+- **energy**（起劲/蔫）：最近工具调用密度；长时间无操作自然蔫回低位
+- **valence**（顺/丧）：最近工具结果的报错率，报错越多越低
+- **control**（笃定/失控）：当前 git 状态——脏文件多、落后主线多、stash 堆积都拉低；干净则拉高
 
-## 配置（`/tvs-hud` 触发）
+三轴 → `moodBucket`（来劲/松弛/毛刺/愤世/蔫/笃定/平）→ 挑一张颜文字脸，脸池取自 `fontFace.json` 同源的「思绪」表情系统。
 
-运行 `/tvs-hud` 进入多选配置，选项写入 `~/.claude/hud/tvs-hud-config.json`，立即生效。
+不落盘意味着**没有跨会话的情绪连续性**——每次渲染都是"此刻"的快照，不是"一路走来"的心电图。这是刻意的简化（原设计文档的完整版要接 hook 捕获 + `.tvs/mood/state.json` 持久化 + 潜意识消化，更接近"心电图"但工程量大得多）；要不要升级到持久化版本，之后再评估。
 
-**可选项：**
+## 架构（自包含，无 omc 依赖）
 
-| 选项 key | 显示位置 | 默认 | 说明 |
-|----------|----------|------|------|
-| `git` | 项目行 | ✓ | `~N ↑N ↓N` 或 `✓` |
-| `taskCounts` | 项目行 | ✓ | `🔥N 💤N ⏳N` 任务计数 |
-| `branchName` | 项目行 | — | 当前分支名（括号内） |
-| `taskLine` | 第三行 | ✓ | 任务标题预览，最多 8 条（当前项目优先） |
-| `radar` | 第一行 | ✓ | 雷达告警行 |
-| `worktrees` | 项目行末 | ✓ | `🌿branch git状态` |
+```
+Claude Code statusLine.command
+        │
+        ▼
+~/.claude/hud/bridge.mjs  ← 部署到固定位置的薄桥接（tvs-setup 拷贝）
+        │ 读 stdin(JSON) → 动态定位真身 → spawnSync 转发 stdin → 吐出 stdout
+        ▼
+<真实安装位置>/skills/tvs-hud/hud/tvs-status.mjs  ← 真正的渲染逻辑
+        │
+        ├─ scripts/lib/usage.mjs       解析 Claude Code 原生 stdin（用量/模型/cwd）
+        ├─ scripts/lib/git.mjs         cwd 所在仓库的分支/状态/worktree（纯 git 查询，无登记表）
+        ├─ scripts/lib/transcript.mjs  transcript 尾部活跃度信号（工具调用密度/错误率）
+        ├─ scripts/lib/mood.mjs        PAD 三轴计算 + 情绪渲染
+        ├─ scripts/lib/kaomoji.mjs     颜文字脸池（移植自「思绪」）
+        └─ scripts/lib/render.mjs      两行拼版
+```
 
-`taskTitleLen`：任务标题截断长度（默认 18 字符）。  
-`taskLineMax`：任务行最多显示条数（默认 8）。
+**为什么要 bridge.mjs 这层**：插件缓存路径带版本号、软链安装路径因机器而异，都不适合硬编码进 `settings.json`；bridge 固定部署在 `~/.claude/hud/bridge.mjs`，运行时自己探测真身装在哪个版本目录，装哪个版本都不用手改配置——同一套探测逻辑沿用自旧版 `combined-status.mjs` 的 `resolveVersioned`，已验证可靠。
 
-## 配置流程
+## 接管链路（`/tvs-hud` 触发时检查/修复）
 
-用户运行 `/tvs-hud` 时，你（AI）执行以下步骤：
+依赖两点（不再是三点——去掉了 `--omc-hud` 这层 omc 兼容标记）：
 
-1. 读取 `~/.claude/hud/tvs-hud-config.json`（不存在则视为全部默认开启）
-2. 用 `AskUserQuestion`（`multiSelect: true`）让用户勾选要显示的项目
-3. 将结果写入 `~/.claude/hud/tvs-hud-config.json`：
-   ```json
-   {
-     "show": ["git", "taskCounts", "taskLine", "radar", "worktrees"],
-     "taskTitleLen": 18,
-     "taskLineMax": 8
-   }
-   ```
-4. 告知用户"配置已保存，statusLine 下次刷新即生效"
+1. `~/.claude/hud/bridge.mjs` 桥接文件存在（由 `tvs-setup doctor --fix` 部署）
+2. `settings.json → statusLine.command` 指向该桥接文件
 
-## 雷达告警逻辑
+`/tvs-hud` 被触发时，你（AI）跑 `node "$SKILL/../tvs-setup/scripts/tvs.mjs" doctor --fix`（或直接告知用户跑 `tvs-setup doctor --fix`），它会检测并按需重新部署 + 接管 statusLine。
 
-雷达行只在有告警时出现，按严重度红→橙→黄排序：
+**互斥提醒**：若日后跑了 `/oh-my-claudecode:hud setup`，它会把 `statusLine.command` 改回纯 omc 的命令，tvs 状态行随之消失——这是正常的"谁在 command 里谁生效"，不是 bug，再跑一次 `doctor --fix` 即可切回来。
 
-| 告警类型 | 触发条件 | 示例 |
-|----------|----------|------|
-| 未提交太久 | dirty + 距上次提交 ≥ 2 天 | `crestrail ~1 未提交3天` |
-| 领先未合并 | ahead ≥ 1 | `shirehub_web ↑28 未合并` |
-| 落后需 rebase | behind ≥ 1 | `main ↓5 需rebase` |
-| stash 积压 | stash ≥ 2 条 | `repo 📦3` |
-| worktree 落后 | worktree behind ≥ 5 | `repo/🌿feat/cdk ↓19` |
-| 停滞任务 | 进行中 > 5 天未更新 | `💤 tvs-task停5天` |
+## 边界（明确不做）
 
-## statusLine 集成
-
-tvs-hud 作为 `combined-status.mjs` 的子进程运行，与 omc HUD 合并后输出到状态栏。  
-配置路径：`~/.claude/settings.json` → `statusLine.command`。
+- 不再尝试与 omc HUD 合并输出到同一状态栏——两者现在互斥（`statusLine.command` 只能指向一个）。
+- 不做跨项目多仓库汇总（旧版"tvs-boss 项目行"式的多项目一次性展开已砍掉）——那类信息去 `/tvs-boss` 面板看。
+- 不做任务标题预览行——去掉了任务系统集成，要看任务用 `/tvs-task`。
+- 情绪引擎不做主动发言/聊天——纯只读渲染进状态栏，不抢对话。

@@ -165,18 +165,18 @@ function detectThirdParty() {
 
 // ---------- HUD 接管（仅 claude 宿主）----------
 //
-// tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路：
-//   1. ~/.claude/hud/combined-status.mjs 桥接文件存在（由仓库部署）
+// tvs-hud 是自包含状态栏（不再merge omc HUD），要出现在 Claude Code 状态栏依赖两点：
+//   1. ~/.claude/hud/bridge.mjs 桥接文件存在（由仓库部署，运行时自己找 tvs-status.mjs 真身并转发 stdin）
 //   2. settings.json → statusLine.command 指向该桥接文件
-//   3. 命令末尾带 --omc-hud（让 OMC 自检 includes("omc-hud") 通过，否则 OMC HUD 退化成诊断文字）
-// 任一断裂，tvs 三行不显示或 OMC HUD 异常。/oh-my-claudecode:hud setup 会把 statusLine 改回纯 omc，复发本问题。
+// 任一断裂，tvs 状态行不显示。/oh-my-claudecode:hud setup 只会改回纯 omc 的 statusLine，
+// 与本桥接不冲突（谁在 statusLine.command 里谁生效，二者互斥，需要 tvs-hud 就再 doctor --fix 一次）。
 
-const HUD_BRIDGE = 'combined-status.mjs'
+const HUD_BRIDGE = 'bridge.mjs'
 const repoHudBridge = () => join(SKILLS_DIR, 'tvs-hud', 'hud', HUD_BRIDGE)
 const installedHudBridge = () => join(homedir(), '.claude', 'hud', HUD_BRIDGE)
 const settingsPath = () => join(homedir(), '.claude', 'settings.json')
 
-/** 检测 HUD 接管链路三点状态；claude 宿主缺失时返回 skipped */
+/** 检测 HUD 接管链路状态；claude 宿主缺失时返回 skipped */
 function checkHud() {
     if (!existsSync(join(homedir(), '.claude'))) return { skipped: true }
     const repoBridge = repoHudBridge()
@@ -186,7 +186,6 @@ function checkHud() {
         bridgeInstalled: existsSync(instBridge),
         bridgeSynced: false,
         statusLineWired: false,
-        omcHudFlag: false,
         command: null,
         issues: [],
     }
@@ -198,10 +197,7 @@ function checkHud() {
         try {
             const cmd = JSON.parse(readFileSync(sp, 'utf8'))?.statusLine?.command ?? null
             r.command = cmd
-            if (cmd) {
-                r.statusLineWired = cmd.includes(HUD_BRIDGE)
-                r.omcHudFlag = cmd.includes('--omc-hud')
-            }
+            if (cmd) r.statusLineWired = cmd.includes(HUD_BRIDGE)
         } catch { /* settings.json 解析失败，下面 issue 兜底 */ }
     }
     // 仓库没有桥接源 → 质量问题，脚本不自动修
@@ -209,21 +205,20 @@ function checkHud() {
     if (!r.bridgeInstalled) r.issues.push('hud-bridge-not-installed')
     else if (!r.bridgeSynced) r.issues.push('hud-bridge-drift')
     if (!r.statusLineWired) r.issues.push('statusline-not-wired')
-    else if (!r.omcHudFlag) r.issues.push('statusline-missing-omc-hud-flag')
     return r
 }
 
 /** 一句话状态标签 */
 function hudLabel(hud) {
     if (hud.skipped) return '未检测到 claude 宿主（跳过）'
-    if (hud.issues.length === 0) return '✅ 已接管（combined-status + --omc-hud）'
+    if (hud.issues.length === 0) return '✅ 已接管（tvs-status bridge，自包含不依赖 omc）'
     return '⚠️ ' + hud.issues.join(', ')
 }
 
 /** 部署桥接文件 仓库 → ~/.claude/hud/（始终拷贝，独立于 skill 软链，卸载 tvs-hud 不影响状态栏） */
 function deployHudBridge() {
     const repoBridge = repoHudBridge()
-    if (!existsSync(repoBridge)) return { ok: false, reason: '仓库缺少 hud/combined-status.mjs 源文件' }
+    if (!existsSync(repoBridge)) return { ok: false, reason: '仓库缺少 hud/bridge.mjs 源文件' }
     const dest = installedHudBridge()
     mkdirSync(dirname(dest), { recursive: true })
     cpSync(repoBridge, dest)
@@ -244,7 +239,7 @@ function wireStatusLine() {
     const firstTok = cfg.statusLine?.command?.match(/^("[^"]+"|\S+)/)?.[1] || ''
     const looksLikeNode = /node(\.exe)?"?$/i.test(firstTok)
     const nodeExe = looksLikeNode ? firstTok : `"${process.execPath}"`
-    const newCmd = `${nodeExe} "${bridge}" --omc-hud`
+    const newCmd = `${nodeExe} "${bridge}"`
     if (!cfg.statusLine) cfg.statusLine = { type: 'command' }
     if (cfg.statusLine.command === newCmd) return { ok: true, changed: false, command: newCmd }
     cfg.statusLine.type = cfg.statusLine.type || 'command'
@@ -261,7 +256,7 @@ function fixHud() {
     fixes.push(`已部署桥接文件 → ${d.dest}`)
     const w = wireStatusLine()
     if (!w.ok) { fixes.push(`❌ statusLine 接管失败：${w.reason}`); return { fixes, ok: false } }
-    fixes.push(w.changed ? `已接管 statusLine.command → ${HUD_BRIDGE} --omc-hud` : 'statusLine 已是期望值，无需改动')
+    fixes.push(w.changed ? `已接管 statusLine.command → ${HUD_BRIDGE}` : 'statusLine 已是期望值，无需改动')
     fixes.push('提示：状态栏下次刷新生效；若日后跑了 /oh-my-claudecode:hud setup 被改回，再 doctor --fix 即可')
     return { fixes, ok: true }
 }
@@ -570,7 +565,7 @@ const INSTALL_FORM_LABEL = {
 const FIX_CLASS = {
     'copy-drift': 'auto', 'broken-link': 'auto', 'rule-drift': 'auto',
     'hud-bridge-not-installed': 'auto', 'hud-bridge-drift': 'auto',
-    'statusline-not-wired': 'auto', 'statusline-missing-omc-hud-flag': 'auto',
+    'statusline-not-wired': 'auto',
     'orphan': 'auto-confirm', 'claude-dup-with-plugin': 'auto-confirm',
     'linked-elsewhere': 'guided', 'dead-script-ref': 'guided',
     'frontmatter-name-mismatch': 'guided', 'frontmatter-no-description': 'guided',
@@ -791,7 +786,7 @@ function doctor(args) {
     if (!det.hud?.skipped && det.hud?.issues?.length) {
         for (const k of det.hud.issues) {
             issues.push({ kind: k, skill: 'HUD 状态栏接管', host: 'claude',
-                hint: k === 'hud-bridge-missing-in-repo' ? '仓库缺 skills/tvs-hud/hud/combined-status.mjs，需补回源文件（脚本不自动修）' : 'doctor --fix 自动修复' })
+                hint: k === 'hud-bridge-missing-in-repo' ? '仓库缺 skills/tvs-hud/hud/bridge.mjs，需补回源文件（脚本不自动修）' : 'doctor --fix 自动修复' })
         }
         // 仓库有源 才能 --fix（missing-in-repo 是质量问题，跳过自动修）
         if (args.fix && det.hud.repoBridgePresent) {
