@@ -24,8 +24,8 @@ disable-model-invocation: true
 
 ### 3. 引导建团（仅新团队 / 空记忆时）
 1. **扫当前目录找项目**：列出当前目录下所有**含 `.git` 的直接子目录**；若**当前目录自身**就是个 git 仓库，它也作为一个候选。把候选列给用户**勾选**——勾中的才纳管，不替用户猜。
-2. 把勾中的项目写进 `.tvs-boss/projects.md`（每个：`id / path / repo / 主分支`，见 `references/memory-design.md` 的格式）。
-3. 问一句团队**守则**有没有要先立的（如"push/合主线必先确认"），写进 `.tvs-boss/rules.md`；没有就留空模板。
+2. 把勾中的项目写进 `.tvs-boss/projects.md`（每个：`id / path / repo / 主分支`，见 `references/memory-design.md` 的格式）；顺带问一句每个项目的**测试/预发布/生产分支**分别是什么（面板"项目"屏要用它算 ahead/behind），**不确定的留空即可，绝不替用户猜**——留空面板会照实展示"欠缺"，猜错比欠缺更危险（细则见 `references/memory-design.md` 环境分支三件套一节）。
+3. **守则预填默认项**：把 `references/default-rules.md` 里的默认通用守则原样写入 `.tvs-boss/rules.md` 的"通用守则（全队）"段（都是平台无关的协作纪律，不含项目细节）；再问一句还有没有要**追加/改**的（如"push/合主线必先确认"已在默认项里，无需重复问）。项目专属红线（如"某项目主线是 develop 而非 main"）问用户后写进"各项目附加红线"段。
 4. 宣布"团队就位，我是 leader，下需求吧"。
 
 ### 4. 生成面板启动器（建团 / 恢复 都做，幂等）
@@ -80,8 +80,9 @@ node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
 - `references/leader-protocol.md` —— 运行细则：调度循环 / stage（靠 git 推） / 确认规则 / 温常驻 / 借力全局 skill。
 - `references/agent-roles.md` —— 自带角色目录
-- `references/memory-design.md` —— 团队记忆三件套（projects / rules / contracts）的格式与"有界"铁律。
+- `references/memory-design.md` —— 团队记忆三件套（projects / rules / contracts）的格式与"有界"铁律，含项目环境分支（测试/预发布/生产）三件套的记法。
+- `references/default-rules.md` —— 建团时预填进 `rules.md` 的默认通用守则（平台无关，不含项目细节）。
 - `references/architecture.md` —— 整体形状 + 决策。
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），leader spawn 时读它取 systemPrompt + 模型档。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，屏序 **进行中/任务/项目/守则/契约**（无 active.md 时无「任务」屏）。
+- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，屏序 **进行中/任务/项目/守则/契约**（无 active.md 时无「任务」屏）。「项目」屏为每个项目列出所有工作目录（主目录 + worktree）及各自分支，并对每条环境分支（测试/预发布/生产）算出 ahead（未提交到该环境）/behind（该环境领先多少）；未配置的环境分支展示"欠缺"。

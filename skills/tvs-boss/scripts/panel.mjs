@@ -51,12 +51,19 @@ function parseProjects(md) {
     let cur = null;
     for (const line of md.split('\n')) {
         const h = line.match(/^##\s+(.+?)\s*$/);
-        if (h) { cur = { id: h[1], path: '', main: 'main' }; out.push(cur); continue; }
+        if (h) { cur = { id: h[1], path: '', main: 'main', envTest: null, envPre: null, envProd: null }; out.push(cur); continue; }
         if (!cur) continue;
         const mp = line.match(/^\s*-\s*path:\s*(.+?)\s*$/i);
         if (mp) cur.path = mp[1];
         const mm = line.match(/^\s*-\s*主分支:\s*(.+?)\s*$/);
         if (mm) cur.main = mm[1];
+        // 环境分支三件套（测试/预发布/生产）——缺则保持 null，渲染层展示"欠缺"，不臆造
+        const mt = line.match(/^\s*-\s*测试分支:\s*(.+?)\s*$/);
+        if (mt) cur.envTest = mt[1];
+        const mr = line.match(/^\s*-\s*预发布分支:\s*(.+?)\s*$/);
+        if (mr) cur.envPre = mr[1];
+        const mo = line.match(/^\s*-\s*生产分支:\s*(.+?)\s*$/);
+        if (mo) cur.envProd = mo[1];
     }
     return out;
 }
@@ -66,6 +73,39 @@ function parseProjects(md) {
 async function git(path, args) {
     try { const { stdout } = await execAsync(`git -C "${path}" ${args}`, { encoding: 'utf8' }); return stdout.trim(); }
     catch { return null; }
+}
+
+/** 列出项目的所有工作目录（主目录 + worktree）：`git worktree list --porcelain` 解析。
+ * 无 worktree 也保证返回至少一条（主目录本身），供渲染统一处理。 */
+async function listWorktrees(p) {
+    const raw = await git(p.path, 'worktree list --porcelain');
+    if (!raw) return [{ path: p.path, branch: null, primary: true }];
+    const entries = [];
+    let cur = null;
+    for (const line of raw.split('\n')) {
+        if (line.startsWith('worktree ')) { cur = { path: line.slice(9).trim(), branch: null }; entries.push(cur); }
+        else if (line.startsWith('branch ') && cur) cur.branch = line.slice(7).trim().replace(/^refs\/heads\//, '');
+        else if (line === 'detached' && cur) cur.branch = '(detached)';
+    }
+    if (entries.length) entries[0].primary = true;
+    return entries.length ? entries : [{ path: p.path, branch: null, primary: true }];
+}
+
+/** 某分支相对某环境分支（测试/预发布/生产）的 ahead/behind；环境分支未配置或本地/远端都找不到 → { missing: true }（欠缺）。
+ * ahead = 该分支比环境分支多的提交（还没进环境）；behind = 环境分支比该分支多的提交。查找/计数都在 repoPath（主目录）跑——refs 全 worktree 共享。 */
+async function envAheadBehind(repoPath, envBranch, targetBranch) {
+    if (!envBranch || !targetBranch) return { missing: true };
+    const localOk = await git(repoPath, `rev-parse --verify --quiet refs/heads/${envBranch}`);
+    let ref = localOk ? envBranch : null;
+    if (!ref) {
+        const remoteOk = await git(repoPath, `rev-parse --verify --quiet refs/remotes/origin/${envBranch}`);
+        if (remoteOk) ref = `origin/${envBranch}`;
+    }
+    if (!ref) return { missing: true };
+    const lr = await git(repoPath, `rev-list --left-right --count ${ref}...${targetBranch}`);
+    if (!lr) return { missing: true };
+    const [b, a] = lr.split(/\s+/).map(Number);
+    return { missing: false, ref, behind: b || 0, ahead: a || 0 };
 }
 
 async function gitSnapshot(p) {
@@ -89,7 +129,21 @@ async function gitSnapshot(p) {
     const stash = stashOut0 ? stashOut0.split('\n').filter(Boolean).length : 0;
     const [msg, when, who, ct] = (last0 || '').split('\x1f');
     const ageDays = ct ? Math.floor((Date.now() / 1000 - Number(ct)) / 86400) : null;
-    return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who, ageDays } };
+
+    // 工作目录（主目录 + worktree）：每个目录各自的分支 × 三条环境分支（测试/预发布/生产）的 ahead/behind
+    const wtEntries = await listWorktrees(p);
+    const worktrees = await Promise.all(wtEntries.map(async (w) => {
+        const wDirty0 = w.primary ? porcelain : (await git(w.path, 'status --porcelain')) || '';
+        const wDirty = wDirty0.split('\n').filter(Boolean).length;
+        const [test, pre, prod] = await Promise.all([
+            envAheadBehind(p.path, p.envTest, w.branch),
+            envAheadBehind(p.path, p.envPre, w.branch),
+            envAheadBehind(p.path, p.envProd, w.branch),
+        ]);
+        return { ...w, dirty: wDirty, env: { test, pre, prod } };
+    }));
+
+    return { ...p, branch, dirty, ahead, behind, branches, stash, last: { msg, when, who, ageDays }, worktrees };
 }
 
 /** 读 tvs-task 的任务表（~/.tasklog/active.md），任务屏用。无文件则返回 null（屏不出现）。 */
@@ -477,8 +531,34 @@ function viewProjects(innerW) {
             lines.push(c.dim('   最近 ') + c.bold(clip(p.last.msg, innerW - 8)));
             lines.push(c.dim('         ' + (p.last.when || '') + ' · ' + (p.last.who || '')));
         }
+        // 环境分支配置：测试/预发布/生产 —— 未在 projects.md 配置的一律"欠缺"，不臆造
+        lines.push(c.dim('   环境分支 ') + envConfigStr(p));
+        // 工作目录（主目录 + worktree）：每个目录各自分支 × 三条环境分支的 ahead/behind
+        if (p.worktrees && p.worktrees.length) {
+            lines.push(c.dim('   工作目录'));
+            for (const w of p.worktrees) {
+                const tag = w.primary ? c.title('◆主') : c.blue('◇wt');
+                const br = w.branch ? c.cyan('⎇' + w.branch) : c.dim('（无分支）');
+                const dt = w.dirty > 0 ? c.yellow(`◉${w.dirty}改`) : c.green('◌干净');
+                lines.push('     ' + tag + ' ' + br + '  ' + dt + '  ' + c.dim(clip(w.path, innerW - 30)));
+                lines.push('       ' + envLine('测试', w.env.test) + '  ' + envLine('预发布', w.env.pre) + '  ' + envLine('生产', w.env.prod));
+            }
+        }
     });
     return lines;
+}
+
+/** 项目环境分支配置摘要（"欠缺"直接标出，不猜测）：测试=test 预发布=dev 生产=master / 预发布=欠缺 */
+function envConfigStr(p) {
+    const seg = (label, v) => label + '=' + (v ? c.cyan(v) : c.dim('欠缺'));
+    return [seg('测试', p.envTest), seg('预发布', p.envPre), seg('生产', p.envProd)].join('  ');
+}
+
+/** 单条环境分支 ahead/behind 展示：欠缺(未配置/找不到分支) → 灰字"欠缺"；否则 ↑ahead(未提交到该环境)↓behind(该环境领先) */
+function envLine(label, st) {
+    if (!st || st.missing) return c.dim(label + '欠缺');
+    const ab = `${st.ahead ? c.ahead('↑' + st.ahead) : c.dim('↑0')}${st.behind ? c.red('↓' + st.behind) : c.dim('↓0')}`;
+    return c.dim(label) + ab;
 }
 
 /** 轻量 markdown → ANSI 行：## 标题 / - 列表 / 普通段。守则/契约用（纯文件原文，轻量渲染）。 */
@@ -563,9 +643,13 @@ function render() {
 // 数据变更签名：只看 git/文件派生量，【刻意排除 now 时钟】——否则每秒都"变"、永远跳不过重绘。
 function dataSig(s) {
     if (!s) return '';
+    const envSig = (st) => !st ? '?' : st.missing ? 'x' : `${st.ahead}/${st.behind}`;
+    const wtSig = (p) => (p.worktrees || []).map((w) =>
+        `${w.path}:${w.branch}:${w.dirty}:${envSig(w.env && w.env.test)}:${envSig(w.env && w.env.pre)}:${envSig(w.env && w.env.prod)}`
+    ).join(',');
     const proj = (s.projects || []).map((p) => p.error
         ? `${p.id}!err`
-        : `${p.id}|${p.branch}|${p.dirty}|${p.ahead}|${p.behind}|${p.stash}|${(p.branches || []).map((b) => b.name + b.age).join(',')}|${p.last && p.last.msg}|${p.last && p.last.when}`
+        : `${p.id}|${p.branch}|${p.dirty}|${p.ahead}|${p.behind}|${p.stash}|${(p.branches || []).map((b) => b.name + b.age).join(',')}|${p.last && p.last.msg}|${p.last && p.last.when}|${wtSig(p)}`
     ).join('；');
     // 任务签名含 状态/进度/停滞天数——[ ]→[x] 这类等长改动靠 done/total 捕获（光看 tasksMd.length 抓不到）
     const tasks = (s.tasks || []).map((t) => `${t.id}:${t.status}:${t.done}/${t.total}:${t.updatedDays}`).join(',');
