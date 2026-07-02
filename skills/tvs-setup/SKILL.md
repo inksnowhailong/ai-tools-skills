@@ -130,7 +130,7 @@ tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路，缺一�
    - `auto:false`（superpowers 纯插件）：脚本和 AI 都跑不了 `/plugin`，把 `cmd` 打印给用户手动执行。
 4. `missingAuto` / `missingManual` 直接告诉你还差哪些、各自怎么补。
 
-> 为什么钩子只"提示"不"直接改"：插件在别人机器上静默改 settings.json / 装全局 npm 太冒犯，所以确定性配置由脚本做、安装动作由 AI 带着用户确认来跑，全程可见。
+> **边界**：只有脚本能确定性完成的配置改动（如上面第 2 步的归一化+写 marker）才允许静默做；涉及安装/执行外部命令（第 3 步 `auto:true`/`auto:false`）必须先经用户确认才能代跑，不能把"确定性配置可静默"泛化到整个 bootstrap 流程。
 
 ## 与 tvs-cc-migrator 的边界
 

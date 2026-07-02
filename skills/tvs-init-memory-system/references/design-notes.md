@@ -1,17 +1,3 @@
-## 分工边界声明（codegraph × .memory）
-
-本系统**与 codegraph 协同部署、但保持各自独立**。两套系统走完全不同的方向，互为补充，**互不依赖**。
-
-### 设计哲学
-
-```text
-codegraph  →  代码结构事实层（机器写、机器读、秒级新鲜）
-.memory    →  业务领域知识层（人/子 Agent 写、长期稳定、慢更新）
-
-二者并行、不互相侵入。子 Agent 维护 .memory 时不调用 codegraph。
-codegraph 不可用时 .memory 依然完整运行。
-```
-
 ### codegraph 专长（让它答这些，.memory 不重复记录）
 
 | 问题类型 | codegraph 入口 |
@@ -43,12 +29,5 @@ codegraph 不可用时 .memory 依然完整运行。
 - **记忆防膨胀是双向的（v4 新增 G + H）**：除"不再记录"的事前规则（H 写入准入黑名单），子 Agent 在**维护某模块时顺手删掉该模块档案里 codegraph 已能回答的存量结构冗余**（G 增量去冗余，零额外扫描）；hook 用代码统计 .memory 体积超标即提示精简（零 AI）。**不做定期全量 AI 去冗余扫描**——那会为省 token 反而狂耗 token。
 - **codegraph 的指令文件我们不写、不改**：codegraph 官方安装器（`npx @colbymchenry/codegraph`）会自动给当前工具写好"怎么用 codegraph 工具"的指南（Cursor `.cursor/rules/codegraph.mdc` / Claude `CLAUDE.md` / Codex `~/.codex/AGENTS.md`）。本 Skill 只在"记忆宪法"里写一句分工路由（业务查 .memory、结构查 codegraph），不与之重叠。
 
-### 为什么明明可被替代仍然不替代
-
-| 能力 | v4 处理 |
-|---|---|
-| 子 Agent 维护主体"反查源码路径"用 Glob/rg/Read | **仍用 Glob/rg/Read**（控制调用次数）；但**自检阶段的路径/符号存在性校验改用 `codegraph_search`**（更准更省 token，装不上回退 git cat-file/Glob） |
-| lint-memory 字符串模式扫描旧路径 / changelog 关键词 | **不用 codegraph**：lint 是 CI / 定期任务，纯代码字符串扫描，不应依赖 MCP 服务可用性 |
-| 模块档案记 barrel / 数据源 / 函数签名参数 | 这是 codegraph 强项，**.memory 完全让位**（H 黑名单事前拦 + G 事后删存量）；仅**业务含义部分**保留 |
 
 ---

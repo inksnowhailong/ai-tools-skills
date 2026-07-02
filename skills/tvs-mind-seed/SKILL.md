@@ -236,7 +236,7 @@ node "<skill-path>/scripts/memory.mjs" write-active "<workspace>" "<agent>" --ac
 
 ## 三件套设计要点（写给你，不给用户讲）
 
-精简自 thoughts 的 HMO-lite（去掉 mind-state），再把静态的 profile + personality 合并成 identity，默认只留三件套；index/sources/consolidated 改懒创建（当前无自动整理流程，不预先铺空文件）：
+**三件套设计**：静态的 profile + personality 合并成 identity，默认只留三件套；index/sources/consolidated 改懒创建（当前无自动整理流程，不预先铺空文件）：
 
 | 文件 | 角色 | 谁写 | 何时读 |
 |---|---|---|---|
