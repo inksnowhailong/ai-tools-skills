@@ -188,6 +188,12 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 ---
 
+**`tvs-skill-audit`** — skill 文档体检，揪出写给人看的废话
+
+> 审计所有 `tvs-*` skill 的 `SKILL.md`/`references/*.md`，找出整段写给人类看的设计理由/背景说明（而非指导 AI 执行的必要内容）。高置信度发现经独立反驳验证后自动精简，其余全部交给你逐条勾选确认要不要改。
+
+---
+
 ## Rules
 
 个人规则注入 Claude Code 全局 `~/.claude/CLAUDE.md` 的托管段，安装时**可按需勾选**哪些启用。每条规则靠自身 frontmatter（`name` / `description` / `default: on|off`）自注册——往 `rules/` 丢个新 `.md` 即可在安装时被勾选，无需维护清单。`default: on` 默认装，`default: off` 可选默认不装。
