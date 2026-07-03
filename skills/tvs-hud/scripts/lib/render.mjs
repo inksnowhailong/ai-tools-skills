@@ -32,6 +32,17 @@ function pctSeg(label, n, warn, danger, safe) {
   return `${label} ${tierColor(n, warn, danger, safe)}${n}%${C.R}`;
 }
 
+// 机器资源利用率段：cpu/mem/disk 三个百分比，各自分档配色（阈值略有差异）。
+// disk 是"磁盘活动时间%"（Task Manager 口径），不是空间占用。数据见 lib/sysmetrics.mjs。
+function sysSeg(sys) {
+  if (!sys) return null;
+  const seg = [];
+  if (sys.cpu != null)  seg.push(`cpu${tierColor(sys.cpu, 70, 90, 30)}${sys.cpu}%${C.R}`);
+  if (sys.mem != null)  seg.push(`mem${tierColor(sys.mem, 75, 90, 40)}${sys.mem}%${C.R}`);
+  if (sys.disk != null) seg.push(`disk${tierColor(sys.disk, 60, 85, 20)}${sys.disk}%${C.R}`);
+  return seg.length ? seg.join(' ') : null;
+}
+
 // effort 档位 → 颜色，越高越"热"：low/medium 冷静，high 起提醒，xhigh/max 最热烈
 const EFFORT_COLOR = { low: C.GRAY, medium: C.BLUE, high: C.ORANGE, xhigh: C.RED, max: C.RED };
 
@@ -92,9 +103,10 @@ function gitStr({ dirty, ahead, behind }) {
  * @param {{ repoName: string, branch: string, git: object, worktrees: Array }|null} repo
  * @param {{ face: string }} mood 只有 face——脸本身就是标签，不额外配文字描述
  * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 版本检测，见 lib/version.mjs
+ * @param {{cpu:number|null, mem:number|null, disk:number|null}|null} sys 机器资源利用率，见 lib/sysmetrics.mjs
  * @returns {string}
  */
-export function contextLine(repo, mood, update = null) {
+export function contextLine(repo, mood, update = null, sys = null) {
   const parts = [];
   if (repo) {
     let chunk = `${C.MAUVE}⎇ ${repo.branch}${C.R} ${gitStr(repo.git)}`;
@@ -104,7 +116,11 @@ export function contextLine(repo, mood, update = null) {
     parts.push(chunk);
   }
   parts.push(mood.face);
-  const head = parts.join('   ');
+  let head = parts.join('   ');
+
+  // 机器资源利用率（cpu/mem/disk）顶在行二最左，与后面的分支/情绪用 "·" 分隔
+  const sysStr = sysSeg(sys);
+  if (sysStr) head = `${sysStr}  ${C.GRAY}·${C.R}  ${head}`;
 
   // 版本：有新版亮绿 + ⇡远端版本，否则暗灰只显当前版本；非插件安装（active 为空）不显示
   const tail = update?.active

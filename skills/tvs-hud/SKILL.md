@@ -28,10 +28,11 @@ Claude Code 底部状态栏的 tvs 数据源，最多两行，**完全自包含�
 | `5h N%` | 5 小时滚动用量（`stdin.rate_limits.five_hour`） |
 | `周 N%` | 7 天用量（`stdin.rate_limits.seven_day`） |
 
-**行二：当前目录 git + 情绪**
+**行二：机器资源 + 当前目录 git + 情绪**
 
 | 符号 | 含义 |
 |------|------|
+| `cpu N% mem N% disk N%`（行首） | 机器资源利用率：CPU / 内存 / **磁盘活动时间**（Task Manager 口径，`100-空闲%`，**不是**已用空间）。分档配色。经后台采样 + TTL 缓存（5s），Windows 走 WMI `Win32_PerfFormattedData_*`（英文属性、locale 无关）——见 `scripts/lib/sysmetrics.mjs` |
 | `⎇ branch` | 当前分支（cwd 落在任意 git 仓库内即显示，**不依赖 tvs-boss 的项目登记表**，纯 cwd 本仓库） |
 | `~N` `↑N` `↓N` | 脏文件 / 领先 / 落后远端；全干净显示 `✓` |
 | `🌿N` | 当前仓库有 N 个 worktree 存在脏改动或落后（数字徽标，不逐条展开——想看细节用 `/tvs-boss` 面板） |

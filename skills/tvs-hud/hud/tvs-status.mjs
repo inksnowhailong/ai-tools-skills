@@ -19,6 +19,7 @@ import { computeMood, renderMood } from '../scripts/lib/mood.mjs';
 import { usageLine, contextLine } from '../scripts/lib/render.mjs';
 import { cached } from '../scripts/lib/cache.mjs';
 import { checkUpdate } from '../scripts/lib/version.mjs';
+import { getSysMetrics } from '../scripts/lib/sysmetrics.mjs';
 
 /**
  * @param {string} rawStdinText Claude Code 喂给 statusLine 命令的 stdin 原文（未解析的 JSON 字符串）
@@ -49,8 +50,9 @@ export function render(rawStdinText) {
   });
   const face = renderMood(mood);
   const update = checkUpdate(); // 纯本地文件读取，不发网络请求
+  const sys = getSysMetrics();  // 读缓存文件，过期则后台采样，不阻塞渲染
 
-  return [usageLine(usage), contextLine(repo, face, update)].filter(Boolean).join('\n');
+  return [usageLine(usage), contextLine(repo, face, update, sys)].filter(Boolean).join('\n');
 }
 
 // CLI 直跑（手测用）：`node tvs-status.mjs < mock.json`。bridge.mjs 走的是上面的 import，不经过这里。
