@@ -54,13 +54,12 @@ function pushToEdge(head, tail) {
 }
 
 /**
- * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔）
- *      + tvs 版本（右侧行尾，低优先级、偶尔瞄一眼的信息）。
+ * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔）。
+ *      tvs 版本挪到了行二右尾（见 contextLine）——行一太长，版本放这儿会被终端宽度截成 "tvs …"。
  * @param {{modelName:string|null, effortLevel:string|null, contextPercent:number|null, fiveHourPercent:number|null, weeklyPercent:number|null}} usage
- * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 插件版本检测结果，见 lib/version.mjs
  * @returns {string} 无任何字段时返回空串
  */
-export function usageLine(usage, update = null) {
+export function usageLine(usage) {
   const head = [];
   if (usage.modelName) {
     // effort 用 "·" 紧挨模型名，视觉上是同一件事的两个属性，不当独立分组
@@ -74,15 +73,8 @@ export function usageLine(usage, update = null) {
   const weekly = pctSeg('周', usage.weeklyPercent, 60, 85, 30);
   if (weekly) head.push(weekly);
 
-  const tail = update?.active
-    ? (update.hasUpdate
-        ? `${C.GREEN}tvs ${update.active}⇡${update.available}${C.R}`
-        : `${C.DIM}tvs ${update.active}${C.R}`)
-    : '';
-
-  if (!head.length && !tail) return '';
-  const headStr = head.join(`  ${C.GRAY}·${C.R}  `);
-  return tail ? pushToEdge(headStr, tail) : headStr;
+  if (!head.length) return '';
+  return head.join(`  ${C.GRAY}·${C.R}  `);
 }
 
 function gitStr({ dirty, ahead, behind }) {
@@ -94,13 +86,15 @@ function gitStr({ dirty, ahead, behind }) {
 }
 
 /**
- * 行二：分支 + git 状态（最常看，放最前）→ 仓库名（次要上下文）→ worktree 徽标 → 情绪脸。
- * 不在 git 仓库时只剩情绪部分。
+ * 行二：分支 + git 状态（最常看，放最前）→ 仓库名（次要上下文）→ worktree 徽标 → 情绪脸，
+ *      再把 tvs 版本顶到行尾（行二短、有空间，不会像行一那样被截断）。
+ * 不在 git 仓库时只剩情绪脸 + 版本。
  * @param {{ repoName: string, branch: string, git: object, worktrees: Array }|null} repo
  * @param {{ face: string }} mood 只有 face——脸本身就是标签，不额外配文字描述
+ * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 版本检测，见 lib/version.mjs
  * @returns {string}
  */
-export function contextLine(repo, mood) {
+export function contextLine(repo, mood, update = null) {
   const parts = [];
   if (repo) {
     let chunk = `${C.MAUVE}⎇ ${repo.branch}${C.R} ${gitStr(repo.git)}`;
@@ -110,5 +104,13 @@ export function contextLine(repo, mood) {
     parts.push(chunk);
   }
   parts.push(mood.face);
-  return parts.join('   ');
+  const head = parts.join('   ');
+
+  // 版本：有新版亮绿 + ⇡远端版本，否则暗灰只显当前版本；非插件安装（active 为空）不显示
+  const tail = update?.active
+    ? (update.hasUpdate
+        ? `${C.GREEN}tvs ${update.active}⇡${update.available}${C.R}`
+        : `${C.DIM}tvs ${update.active}${C.R}`)
+    : '';
+  return tail ? pushToEdge(head, tail) : head;
 }
