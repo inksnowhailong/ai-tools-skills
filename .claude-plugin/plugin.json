@@ -1,6 +1,6 @@
 {
   "name": "tvs-inksnow",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "工具中性的个人 AI skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、skill 文档审计等 16 个 skill。",
   "author": { "name": "inksnowhailong" },
   "repository": "https://github.com/inksnowhailong/ai-tools-skills",
