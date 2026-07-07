@@ -13,6 +13,7 @@
  *   node "<skill-path>/scripts/tvs.mjs" install [--target claude,cursor] [--mode link|copy] [--only a,b] [--force] [--prune] [--no-pull]
  *   node "<skill-path>/scripts/tvs.mjs" doctor [--fix] [--no-pull]   体检：漂移 / 死引用 / frontmatter / 孤儿 / 断链 / HUD 接管
  *   node "<skill-path>/scripts/tvs.mjs" update [--pull]  检查远程是否有新版本；--pull 拉取（仅 ff，脏仓库拒绝）
+ *   node "<skill-path>/scripts/tvs.mjs" set-superpowers-variant --variant original|zh   记录用户选择的 superpowers 版本（原版全局插件 / 中文版 superpowers-zh 按项目 npm 拷贝）
  *
  * 安装模型：
  *   - install/doctor 开头自动拉取远程最新（ensureLatest）——tvs-setup 永远跑在最新版上；
@@ -142,7 +143,16 @@ function pluginInstalled(name) {
     return false
 }
 
+/** superpowers 两个变体的安装建议文案（原版全局插件 / 中文版按项目 npm 拷贝，机制完全不同） */
+function superpowersHint(variant) {
+    if (variant === 'zh') {
+        return '当前项目根目录跑 npx superpowers-zh（社区中文增强版，按项目拷贝进 .claude/skills/，非全局插件；不要在主目录 ~ 下跑）'
+    }
+    return 'Claude Code 内 /plugin → 添加 marketplace obra/superpowers-marketplace → 安装 superpowers'
+}
+
 function detectThirdParty() {
+    const superpowersVariant = readSuperpowersVariant()
     return {
         node: run('node --version'),
         codegraph: {
@@ -156,8 +166,10 @@ function detectThirdParty() {
             why: '并行编排/自治循环/专业 agent 池（autopilot、ultrawork、team 等），tvs 不做这类重编排能力',
         },
         superpowers: {
+            // installed 只对原版全局插件有效（superpowers-zh 是按项目拷贝，无法用插件缓存探测）
             installed: pluginInstalled('superpowers'),
-            hint: 'Claude Code 内 /plugin → 添加 marketplace obra/superpowers-marketplace → 安装 superpowers',
+            variant: superpowersVariant,
+            hint: superpowersHint(superpowersVariant),
             why: 'TDD/系统化调试/计划执行等工程纪律工作流，与 tvs 的中文项目工作流互补',
         },
     }
@@ -520,6 +532,10 @@ function detect() {
         if (k === 'node') continue
         summary.push(`${k}: ${v.installed ? '✅ 已就绪' : '⬜ 未安装（可增强）'}`)
     }
+    if (thirdParty.superpowers.variant === null) {
+        summary.push('💡 尚未选择 superpowers 版本（原版 / 中文版 superpowers-zh）：用 AskUserQuestion 问一次，'
+            + '再跑 set-superpowers-variant --variant original|zh 记下来，之后不再重复问')
+    }
     const installForm = resolveInstallForm({ hosts: H, skills })
     for (const [hostName, form] of Object.entries(installForm)) {
         if (form === 'host-absent') continue
@@ -852,12 +868,39 @@ function setBudgetFraction(value = 0.02) {
     return { ok: true, changed: true, from: cur ?? null, value }
 }
 
-/** 写自举 marker（记录已自举的插件版本，供 SessionStart 钩子比对决定是否再提示） */
+/** 读 marker 原始内容（不存在或损坏时返回 {}），供合并写入用 */
+function readMarkerRaw() {
+    const p = markerPath()
+    if (!existsSync(p)) return {}
+    try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return {} }
+}
+
+/** 写自举 marker（记录已自举的插件版本，供 SessionStart 钩子比对决定是否再提示）
+ *  合并写入：保留 superpowersVariant 等其余字段，只更新 version/bootstrappedAt。 */
 function writeMarker(version) {
     const p = markerPath()
     mkdirSync(dirname(p), { recursive: true })
-    writeFileSync(p, JSON.stringify({ version, bootstrappedAt: new Date().toISOString() }, null, 2) + '\n')
+    const merged = { ...readMarkerRaw(), version, bootstrappedAt: new Date().toISOString() }
+    writeFileSync(p, JSON.stringify(merged, null, 2) + '\n')
     return norm(p)
+}
+
+/** 读用户已选的 superpowers 变体（'original' | 'zh'），未选过返回 null */
+function readSuperpowersVariant() {
+    const v = readMarkerRaw().superpowersVariant
+    return v === 'original' || v === 'zh' ? v : null
+}
+
+/** 持久化用户选择的 superpowers 变体，合并写入 marker（不存在则新建） */
+function writeSuperpowersVariant(variant) {
+    if (variant !== 'original' && variant !== 'zh') {
+        return { ok: false, reason: `非法 variant: ${variant}（只接受 original|zh）` }
+    }
+    const p = markerPath()
+    mkdirSync(dirname(p), { recursive: true })
+    const merged = { ...readMarkerRaw(), superpowersVariant: variant }
+    writeFileSync(p, JSON.stringify(merged, null, 2) + '\n')
+    return { ok: true, variant, marker: norm(p) }
 }
 
 /** 读当前插件版本（.claude-plugin/plugin.json），读不到返回 null */
@@ -878,22 +921,34 @@ function bootstrap() {
             cmd: 'npx @colbymchenry/codegraph',
             note: '装好后按项目运行 codegraph init -i 建索引（交互式，由用户执行）', why: tp.codegraph.why },
         superpowers: { installed: tp.superpowers.installed, kind: 'plugin', auto: false,
-            cmd: '/plugin marketplace add obra/superpowers-marketplace 然后 /plugin install superpowers',
-            why: tp.superpowers.why },
+            variant: tp.superpowers.variant, cmd: tp.superpowers.hint, why: tp.superpowers.why },
     }
     const ver = pluginVersion()
     const marker = ver ? writeMarker(ver) : null
     const missingAuto = Object.entries(deps).filter(([, d]) => !d.installed && d.auto).map(([k]) => k)
     const missingManual = Object.entries(deps).filter(([, d]) => !d.installed && !d.auto).map(([k]) => k)
+    const needsVariantChoice = tp.superpowers.variant === null
     const summary = [
         budget.ok
             ? (budget.changed ? `已设 skillListingBudgetFraction=0.02（原 ${budget.from ?? '未设'}）` : 'skillListingBudgetFraction 已是 0.02')
             : `预算未设：${budget.reason}`,
         missingAuto.length ? `待自动安装（征得同意后 AI 直接跑）：${missingAuto.join(', ')}` : '可脚本化依赖齐全',
         missingManual.length ? `需手动 /plugin 安装：${missingManual.join(', ')}` : '插件类依赖齐全',
+        needsVariantChoice
+            ? '💡 尚未选择 superpowers 版本（原版 / 中文版 superpowers-zh）：用 AskUserQuestion 问一次，再跑 set-superpowers-variant --variant original|zh 记下来，之后不再重复问'
+            : `superpowers 版本已选：${tp.superpowers.variant}`,
         marker ? `已写 bootstrap marker（v${ver}）→ ${marker}` : 'marker 未写（读不到插件版本）',
     ]
-    return { budget, deps, missingAuto, missingManual, marker, pluginVersion: ver, summary }
+    return { budget, deps, missingAuto, missingManual, needsVariantChoice, marker, pluginVersion: ver, summary }
+}
+
+/** CLI 入口：持久化用户选择的 superpowers 变体 */
+function setSuperpowersVariant(args) {
+    const variant = args.variant
+    const res = writeSuperpowersVariant(variant)
+    return res.ok
+        ? { ...res, summary: [`已记录 superpowers 版本选择：${res.variant} → ${res.marker}`] }
+        : { error: res.reason }
 }
 
 // ---------- CLI ----------
@@ -946,8 +1001,9 @@ function main() {
     else if (cmd === 'repair') out = doctor({ ...args, fix: true })
     else if (cmd === 'update') out = update(args)
     else if (cmd === 'bootstrap') out = bootstrap()
+    else if (cmd === 'set-superpowers-variant') out = setSuperpowersVariant(args)
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap> [--target claude,cursor] [--mode link|copy] [--only a,b] [--rules role,coding-rules|none] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap|set-superpowers-variant> [--target claude,cursor] [--mode link|copy] [--only a,b] [--rules role,coding-rules|none] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull] [--variant original|zh]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)

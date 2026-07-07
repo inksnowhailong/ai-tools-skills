@@ -41,7 +41,9 @@ try {
           + `node "\${CLAUDE_PLUGIN_ROOT}/skills/tvs-setup/scripts/tvs.mjs" bootstrap，解读其 JSON 后——`
           + `(1) 它已静默把 skillListingBudgetFraction 归一到 0.02；`
           + `(2) 对缺失且可脚本化的依赖（omc 走 npm、codegraph 走 npx）征得用户同意后直接安装；`
-          + `(3) 对纯插件依赖（superpowers）打印 /plugin 命令交用户手动执行。完成后 marker 写入，本提示不再出现。`
+          + `(3) 对纯插件依赖（superpowers）——若 deps.superpowers.variant 为 null，先用 AskUserQuestion 问一次`
+          + `"原版 superpowers（/plugin 全局插件）还是中文版 superpowers-zh（npx 按项目安装）"，选完调 `
+          + `set-superpowers-variant --variant original|zh 记下来；已选过的直接打印 deps.superpowers.cmd 交用户手动执行。完成后 marker 写入，本提示不再出现。`
         : `tvs-inksnow 插件已从 ${doneVersion} 升级到 ${pluginVersion}，可能引入新依赖。建议重跑 `
           + `node "\${CLAUDE_PLUGIN_ROOT}/skills/tvs-setup/scripts/tvs.mjs" bootstrap 让依赖与配置跟进到新版本。`
 

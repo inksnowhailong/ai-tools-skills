@@ -24,6 +24,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 | `repair [--prune] [--prune-stale-claude]` | **自愈入口** = `doctor --fix` + 破坏性清理（需显式 flag、先告知用户）：`--prune` 清孤儿、`--prune-stale-claude` 删"插件已装却又在 ~/.claude/skills 的旧目录安装"（mixed 形式去重，只删本仓库 skill、留用户自有）。可在插件形式下运行（自愈正需如此）|
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
 | `bootstrap` | 插件消费者一次性自举：静默归一 `skillListingBudgetFraction=0.02` + 写 marker + 输出依赖安装计划（见下节"插件自举"）。由 SessionStart 钩子自动提示触发 |
+| `set-superpowers-variant --variant original\|zh` | 持久化用户选择的 superpowers 版本（合并写入 marker，不碰其余字段）；选完之后 detect/doctor/bootstrap 的 superpowers 建议命令跟着变，不再重复问 |
 
 ## 四种使用场景
 
@@ -68,6 +69,13 @@ tvs 专注差异化：任务账本、字符画分析、个人代码观、思维�
 
 - 缺失时把 `hint` 命令和 `why` 一句话给用户，**征得同意后可以代跑安装命令**；用户拒绝不影响 tvs 任何功能（所有 tvs skill 都有降级路径）。
 - 全部就绪时一句话确认即可，不要重复推销。
+
+**superpowers 版本选择（原版 / 中文版）**：原版 superpowers 与 `jnMetaCode/superpowers-zh`（社区中文增强版）安装机制完全不同——原版是 Claude Code 全局插件（`/plugin marketplace add obra/superpowers-marketplace` 后 `/plugin install`），中文版是按项目跑 `npx superpowers-zh` 把 skills 拷进当前项目 `.claude/skills/`（不是全局插件，装前提醒用户别在主目录 `~` 下跑）。两者不会被脚本自动探测/切换，只是给对建议文案：
+
+- `detect`/`bootstrap` 输出的 `thirdParty.superpowers.variant`（或 `deps.superpowers.variant`）为 `null` 时，summary 会带一行"尚未选择 superpowers 版本"——此时**必须**用 AskUserQuestion 问一次"原版 / 中文版"，选完调 `set-superpowers-variant --variant original|zh` 记下来。
+- 已选过的（`variant` 非 null），`hint`/`cmd` 会自动是对应版本的安装命令，不要再重复问。
+- 用户随时说"切换成中文版/原版"，直接调 `set-superpowers-variant` 改写即可，不用走一次性询问流程。
+- 这只是记录偏好、改建议文案——脚本不做真正的自动安装/卸载，两个版本要不要同时存在、装哪个由用户自己决定。
 
 ### 5. 调整规则开关（"开启 feedback-loop / 调整规则 / 打开反哺 / 关掉某条规则"）
 
@@ -127,7 +135,7 @@ tvs-hud 要出现在 Claude Code 状态栏，依赖一条三点链路，缺一�
 2. 脚本已**确定性**完成两件事：静默把 `skillListingBudgetFraction` 归一到 `0.02`（仅这一个键，保序回写）、写 marker（之后不再提示，除非插件升级）。
 3. 依赖按 `deps` 分类处理——**激进全自动**原则：
    - `auto:true`（omc 走 npm、codegraph 走 npx）：缺失时**征得用户同意后直接代跑** `cmd`（`npm i -g oh-my-claudecode && omc setup` / `npx @colbymchenry/codegraph`）。codegraph 的 `codegraph init -i` 是按项目交互建索引，留给用户。
-   - `auto:false`（superpowers 纯插件）：脚本和 AI 都跑不了 `/plugin`，把 `cmd` 打印给用户手动执行。
+   - `auto:false`（superpowers 纯插件）：先看 `deps.superpowers.variant`——为 `null` 就用 AskUserQuestion 问一次"原版 / 中文版 superpowers-zh"，选完调 `set-superpowers-variant --variant original|zh`；已选过的直接把 `cmd`（对应版本的安装命令）打印给用户手动执行，脚本和 AI 都跑不了 `/plugin` 或项目内 `npx`。
 4. `missingAuto` / `missingManual` 直接告诉你还差哪些、各自怎么补。
 
 > **边界**：只有脚本能确定性完成的配置改动（如上面第 2 步的归一化+写 marker）才允许静默做；涉及安装/执行外部命令（第 3 步 `auto:true`/`auto:false`）必须先经用户确认才能代跑，不能把"确定性配置可静默"泛化到整个 bootstrap 流程。
