@@ -4,23 +4,28 @@
 
 ## leader 怎么 spawn 一个角色
 
-1. 查 `scripts/team-roles.json` 该角色是否有 `omcSubagentType` 字段。
+**主路径（角色定义已生成——启动协议第 4 步保证）：**
 
-   **⚠️ model 取值铁律（最常见的坑）**：`model` 参数**只能**是 Agent 工具认的别名之一——`opus` / `sonnet` / `haiku`（还有 `fable`，本系统不用）。
-   - **绝不要**传全模型 ID（`claude-opus-4-8`、`claude-sonnet-4-6` 等），**也不要**传 tier 词（`deep`/`fast`/`cheap`）——这两类都不是合法值，会被工具**静默忽略**，导致队员继承 leader 的 Opus（"改 model 无效、全 Opus、又慢又烧 token"就是这么来的）。
-   - 取值方法（任选其一，结果一致）：① 直接看角色 `defaultModel` 属于哪个家族——含 `opus`→传 `opus`、含 `sonnet`→传 `sonnet`、含 `haiku`→传 `haiku`；② 或按 tier 映射 `deep→opus`、`fast→sonnet`、`cheap→haiku`（等价于查 `modelsByTarget.claude[tier]`，该表已是别名）。
-   - **必须显式传**——不传也会继承 leader 的 Opus。
+`Agent({ subagent_type: "tvs-<角色id>", prompt: "<派工单>" })`
 
-   **有 `omcSubagentType`（18/19 角色）→ 优先路径：**
-   `Agent({ subagent_type: "<omcSubagentType>", model: "opus|sonnet|haiku", prompt: "..." })`
-   omc agent 自带 systemPrompt，无需手动注入；但 **model 必须按上面铁律显式传别名**。
+- **不传 model**——已钉死在 `<团队根>/.claude/agents/tvs-<id>.md` 的 frontmatter（档位：deep→opus / fast→sonnet / cheap→haiku，生成源是 `scripts/team-roles.json`）。
+- 工具边界、团队红线、回执格式也都烤在定义里；leader 只负责**把派工单写全**（项目/分支/任务/背景/范围，模板见 `leader-protocol.md` 第一节）。
+- 定义由 `make-agents.mjs` 生成，幂等；改了 `team-roles.json` 或红线/回执模板后重跑即同步。
 
-   **无 `omcSubagentType`（仅 `vision`）→ 降级路径：**
-   取 `systemPrompt` 手动注入通用 agent：
-   `Agent({ model: "opus|sonnet|haiku", prompt: "<systemPrompt>\n\n<任务上下文>" })`
+**降级路径（角色定义缺失时才用）：**
 
-2. **无论哪条路径，dev 场景都要通过 prompt 补注项目上下文**：`path / 主分支 / 当前需求`；只读/分析类角色可跨项目共享。
-3. **项目增强（codegraph / 记忆）无需注入——队员自动加载项目 CLAUDE.md 就拿到了**（见 `leader-protocol.md` 第九节）：codegraph 指令、记忆宪法、项目架构约定都已写在项目 `CLAUDE.md` 里，dev 在该项目 cwd 干活会自动加载，所以"结构问题优先 codegraph、需要业务语义按需查记忆"这些规则队员**自动具备**。leader 只需确认项目装了这些（没装则降级 grep/read），**不要再往 prompt 里塞**——注入费 token、拖慢、且多余。
+1. 有 `omcSubagentType`（18/19 角色）→ `Agent({ subagent_type: "<omcSubagentType>", model: "opus|sonnet|haiku", prompt: "..." })`
+   ⚠️ **此路径必须显式传 model 别名**（`opus`/`sonnet`/`haiku` 三者之一）：传全模型 ID（`claude-opus-4-8`…）或 tier 词（`deep`）会被工具**静默忽略**→队员继承 leader 的 Opus（又慢又烧）；不传也继承。取值看角色 `defaultModel` 家族，或按 `deep→opus / fast→sonnet / cheap→haiku` 映射。
+2. 仅 `vision` 无 `omcSubagentType` → 取 `systemPrompt` 手动注入通用 agent。
+3. 降级路径没有烤入的红线和回执模板——**红线区块和回执格式须 leader 手动贴进派工单**（从任一生成的 tvs-*.md 里抄）。
+
+**续用 vs 新建（一句话判据）**：这一步是不是同一条需求的延续？是 → `SendMessage` 续派原队员；不是 → 新 spawn。细则见 `leader-protocol.md` 第四节。
+
+**Agent 工具权限双轨（机制）**：
+- 实现类 4 角色（executor / designer / test-engineer / code-simplifier）**保留 Agent 工具**——唯一被允许的用法是派**只读侦察**（explore / 文档检索），一层为限；派会改码的子代理、启动编排类 skill 都是红线。
+- 其余 15 个共享角色的工具白名单**不含 Agent 工具**——机制焊死，想违规也调不出来。
+
+**派工单要写全项目上下文**：dev 场景注入 `path / 分支 / 当前需求 / 背景 / 范围`；只读/分析类角色可跨项目共享。**项目增强（codegraph / 记忆）无需注入**——队员自动加载项目 `CLAUDE.md` 就拿到了（见 `leader-protocol.md` 第九节）；leader 只需确认项目装没装（没装则降级 grep/read），不往 prompt 里塞。
 
 ## 19 角色一览
 
@@ -56,4 +61,5 @@
 - **dev/实现类能 commit 到功能分支**（leader 可自动放行）；**push / 合并主线，任何角色都不行——必须 boss 拍板、leader 才放行**。
 - 分析/质量/安全类**只读不改**，给判断和问题清单，不动代码。
 - `git-master` 做不可逆操作（history rewrite / 强推 / 删分支）前必须先确认。
-- 角色干完即向 leader（"main"）报结果，不自作主张往下走。
+- 角色的最终输出=回执（格式烤在角色定义里），由 Agent 工具管道送回 leader；干完即散，不自作主张往下走。
+- "只读不改"与"无权派人"对 15 个共享角色是**工具白名单机制保证**；实现类的编排禁令靠红线提示词约束，爆炸半径由"无 push 权限 + 只能在指定功能分支 commit"兜底。
