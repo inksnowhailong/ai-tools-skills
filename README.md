@@ -202,6 +202,7 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 |---|---|---|
 | `role.md` | on | AI 助手角色定位、交付方式、代码质量意识与颜文字风格 |
 | `coding-rules.md` | on | 编码风格、TypeScript 约定、注释规范、Tailwind/UnoCSS 样式规则、`data-alt` 规范 |
+| `visual-explain.md` | on | 图示优先——对话里用字符画讲结构/流程，人看的 md 文档用 mermaid 图 |
 | `feedback-loop.md` | off | 派活反馈——任务有摩擦时给一句改写范本，持续训练用户内化更好的指令 |
 | `fontFace.json` | — | 字体相关配置数据（按需查阅，非规则、不注入） |
 
