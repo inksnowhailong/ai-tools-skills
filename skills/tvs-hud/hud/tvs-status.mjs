@@ -52,7 +52,7 @@ export function render(rawStdinText) {
   const update = checkUpdate(); // 纯本地文件读取，不发网络请求
   const sys = getSysMetrics();  // 读缓存文件，过期则后台采样，不阻塞渲染
 
-  return [usageLine(usage), contextLine(repo, face, update, sys)].filter(Boolean).join('\n');
+  return [usageLine(usage, update), contextLine(repo, face, sys)].filter(Boolean).join('\n');
 }
 
 // CLI 直跑（手测用）：`node tvs-status.mjs < mock.json`。bridge.mjs 走的是上面的 import，不经过这里。

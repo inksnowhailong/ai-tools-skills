@@ -43,34 +43,25 @@ function sysSeg(sys) {
   return seg.length ? seg.join(' ') : null;
 }
 
+// tvs 版本段：有新版亮绿 + ⇡远端版本，否则暗灰只显当前版本；非插件安装（active 为空）不显示
+function versionSeg(update) {
+  if (!update?.active) return null;
+  return update.hasUpdate
+    ? `${C.GREEN}tvs ${update.active}⇡${update.available}${C.R}`
+    : `${C.DIM}tvs ${update.active}${C.R}`;
+}
+
 // effort 档位 → 颜色，越高越"热"：low/medium 冷静，high 起提醒，xhigh/max 最热烈
 const EFFORT_COLOR = { low: C.GRAY, medium: C.BLUE, high: C.ORANGE, xhigh: C.RED, max: C.RED };
 
-/** 去掉 ANSI 转义码后的可见字符长度，供右对齐算间距用。 */
-function visibleLen(s) {
-  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
-}
-
 /**
- * 把 tail 推到行尾——Claude Code 会在跑脚本前设好 COLUMNS 环境变量（>=2.1.153），
- * 拿不到就降级成固定间距，不强算，避免在旧版本/异常环境里把行硬撑爆或对不齐。
- */
-function pushToEdge(head, tail) {
-  const cols = Number(process.env.COLUMNS);
-  if (Number.isFinite(cols) && cols > 20) {
-    const pad = cols - visibleLen(head) - visibleLen(tail);
-    if (pad >= 2) return head + ' '.repeat(pad) + tail;
-  }
-  return head + '  ' + tail;
-}
-
-/**
- * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔）。
- *      tvs 版本挪到了行二右尾（见 contextLine）——行一太长，版本放这儿会被终端宽度截成 "tvs …"。
+ * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔），
+ *      末尾紧跟 tvs 版本——之前顶在行二右尾，靠 COLUMNS 右对齐，宽度算不准时等于看不见。
  * @param {{modelName:string|null, effortLevel:string|null, contextPercent:number|null, fiveHourPercent:number|null, weeklyPercent:number|null}} usage
+ * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 版本检测，见 lib/version.mjs
  * @returns {string} 无任何字段时返回空串
  */
-export function usageLine(usage) {
+export function usageLine(usage, update = null) {
   const head = [];
   if (usage.modelName) {
     // effort 用 "·" 紧挨模型名，视觉上是同一件事的两个属性，不当独立分组
@@ -83,6 +74,8 @@ export function usageLine(usage) {
   if (fiveHour) head.push(fiveHour);
   const weekly = pctSeg('周', usage.weeklyPercent, 60, 85, 30);
   if (weekly) head.push(weekly);
+  const ver = versionSeg(update);
+  if (ver) head.push(ver);
 
   if (!head.length) return '';
   return head.join(`  ${C.GRAY}·${C.R}  `);
@@ -97,16 +90,14 @@ function gitStr({ dirty, ahead, behind }) {
 }
 
 /**
- * 行二：分支 + git 状态（最常看，放最前）→ 仓库名（次要上下文）→ worktree 徽标 → 情绪脸，
- *      再把 tvs 版本顶到行尾（行二短、有空间，不会像行一那样被截断）。
- * 不在 git 仓库时只剩情绪脸 + 版本。
+ * 行二：分支 + git 状态（最常看，放最前）→ 仓库名（次要上下文）→ worktree 徽标 → 情绪脸。
+ * 不在 git 仓库时只剩情绪脸。
  * @param {{ repoName: string, branch: string, git: object, worktrees: Array }|null} repo
  * @param {{ face: string }} mood 只有 face——脸本身就是标签，不额外配文字描述
- * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 版本检测，见 lib/version.mjs
  * @param {{cpu:number|null, mem:number|null, disk:number|null}|null} sys 机器资源利用率，见 lib/sysmetrics.mjs
  * @returns {string}
  */
-export function contextLine(repo, mood, update = null, sys = null) {
+export function contextLine(repo, mood, sys = null) {
   const parts = [];
   if (repo) {
     let chunk = `${C.MAUVE}⎇ ${repo.branch}${C.R} ${gitStr(repo.git)}`;
@@ -122,11 +113,5 @@ export function contextLine(repo, mood, update = null, sys = null) {
   const sysStr = sysSeg(sys);
   if (sysStr) head = `${sysStr}  ${C.GRAY}·${C.R}  ${head}`;
 
-  // 版本：有新版亮绿 + ⇡远端版本，否则暗灰只显当前版本；非插件安装（active 为空）不显示
-  const tail = update?.active
-    ? (update.hasUpdate
-        ? `${C.GREEN}tvs ${update.active}⇡${update.available}${C.R}`
-        : `${C.DIM}tvs ${update.active}${C.R}`)
-    : '';
-  return tail ? pushToEdge(head, tail) : head;
+  return head;
 }
