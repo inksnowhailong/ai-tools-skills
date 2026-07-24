@@ -56,10 +56,10 @@ export function computeMood(activity, git, signals = {}) {
 }
 
 /**
- * 只出颜文字本身——脸就是标签，不额外配文字描述。
+ * 只出颜文字本身——脸就是标签，不额外配文字描述；situation 一并带出，供渲染层按情绪上色。
  * @param {{ pad: object, situation: string }} mood
- * @returns {{ face: string }}
+ * @returns {{ face: string, situation: string }}
  */
 export function renderMood(mood) {
-  return { face: pickKaomoji(mood.situation, mood.pad) };
+  return { face: pickKaomoji(mood.situation, mood.pad), situation: mood.situation };
 }

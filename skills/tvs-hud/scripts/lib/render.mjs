@@ -54,14 +54,23 @@ function versionSeg(update) {
 // effort 档位 → 颜色，越高越"热"：low/medium 冷静，high 起提醒，xhigh/max 最热烈
 const EFFORT_COLOR = { low: C.GRAY, medium: C.BLUE, high: C.ORANGE, xhigh: C.RED, max: C.RED };
 
+// 情绪脸配色：脸型 + 颜色双通道表达同一信号——hot 卡壳红、warm 干活橙、cold 平稳蓝、quiet 空闲暗灰
+const MOOD_COLOR = { hot: C.RED, warm: C.ORANGE, cold: C.BLUE, quiet: C.GRAY };
+
+function moodSeg(mood) {
+  if (!mood?.face) return null;
+  return `${MOOD_COLOR[mood.situation] ?? C.GRAY}${mood.face}${C.R}`;
+}
+
 /**
- * 行一：模型/effort + ctx/5h/周三项各自独立展示（左侧，高优先级、常看的信息，用 "·" 分隔），
- *      末尾紧跟 tvs 版本——之前顶在行二右尾，靠 COLUMNS 右对齐，宽度算不准时等于看不见。
+ * 行一：情绪脸领衔（第一眼位置、按 situation 上色）+ 模型/effort + ctx/5h/周三项各自独立展示
+ *      （用 "·" 分隔），末尾紧跟 tvs 版本——之前顶在行二右尾，靠 COLUMNS 右对齐，宽度算不准时等于看不见。
  * @param {{modelName:string|null, effortLevel:string|null, contextPercent:number|null, fiveHourPercent:number|null, weeklyPercent:number|null}} usage
  * @param {{active:string|null, available:string|null, hasUpdate:boolean}|null} update tvs 版本检测，见 lib/version.mjs
+ * @param {{ face: string, situation: string }|null} mood 情绪脸，见 lib/mood.mjs
  * @returns {string} 无任何字段时返回空串
  */
-export function usageLine(usage, update = null) {
+export function usageLine(usage, update = null, mood = null) {
   const head = [];
   if (usage.modelName) {
     // effort 用 "·" 紧挨模型名，视觉上是同一件事的两个属性，不当独立分组
@@ -77,8 +86,11 @@ export function usageLine(usage, update = null) {
   const ver = versionSeg(update);
   if (ver) head.push(ver);
 
-  if (!head.length) return '';
-  return head.join(`  ${C.GRAY}·${C.R}  `);
+  const rest = head.join(`  ${C.GRAY}·${C.R}  `);
+  const face = moodSeg(mood);
+  // 脸不参与 "·" 分组——它是整行的情绪前缀，不是又一个指标段
+  if (!face) return rest;
+  return rest ? `${face}  ${rest}` : face;
 }
 
 function gitStr({ dirty, ahead, behind }) {
@@ -90,14 +102,13 @@ function gitStr({ dirty, ahead, behind }) {
 }
 
 /**
- * 行二：分支 + git 状态（最常看，放最前）→ 仓库名（次要上下文）→ worktree 徽标 → 情绪脸。
- * 不在 git 仓库时只剩情绪脸。
+ * 行二：机器资源利用率 + 分支 + git 状态 → 仓库名（次要上下文）→ worktree 徽标。
+ * 情绪脸已移至行一开头（第一眼位置）；不在 git 仓库且无 sys 数据时整行省略。
  * @param {{ repoName: string, branch: string, git: object, worktrees: Array }|null} repo
- * @param {{ face: string }} mood 只有 face——脸本身就是标签，不额外配文字描述
  * @param {{cpu:number|null, mem:number|null, disk:number|null}|null} sys 机器资源利用率，见 lib/sysmetrics.mjs
  * @returns {string}
  */
-export function contextLine(repo, mood, sys = null) {
+export function contextLine(repo, sys = null) {
   const parts = [];
   if (repo) {
     let chunk = `${C.MAUVE}⎇ ${repo.branch}${C.R} ${gitStr(repo.git)}`;
@@ -106,7 +117,6 @@ export function contextLine(repo, mood, sys = null) {
     if (attention) chunk += `  🌿${C.ORANGE}${attention}${C.R}`;
     parts.push(chunk);
   }
-  parts.push(mood.face);
   let head = parts.join('   ');
 
   // 机器资源利用率（cpu/mem/disk）顶在行二最左，与后面的分支/情绪用 "·" 分隔
