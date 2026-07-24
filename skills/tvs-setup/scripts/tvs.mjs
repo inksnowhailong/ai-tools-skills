@@ -54,6 +54,14 @@ function listRepoSkills() {
         .map((d) => d.name)
 }
 
+/** 读 skill frontmatter 的 hosts 字段（逗号分隔，自注册同 rules）：返回适用宿主数组；未声明 = null（全宿主通用） */
+function skillHosts(skillName) {
+    const fm = readFileSync(join(SKILLS_DIR, skillName, 'SKILL.md'), 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)
+    const raw = fm?.[1].match(/^hosts:\s*(.+)$/m)?.[1]
+    if (!raw) return null
+    return raw.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
 /** 宿主定义：skill 安装目录按宿主区分；Codex 无同构 skills 目录，不在安装范围 */
 function hosts() {
     const home = homedir()
@@ -583,8 +591,10 @@ const FIX_CLASS = {
     'hud-bridge-not-installed': 'auto', 'hud-bridge-drift': 'auto',
     'statusline-not-wired': 'auto',
     'orphan': 'auto-confirm', 'claude-dup-with-plugin': 'auto-confirm',
+    'wrong-host-install': 'auto-confirm',
     'linked-elsewhere': 'guided', 'dead-script-ref': 'guided',
     'frontmatter-name-mismatch': 'guided', 'frontmatter-no-description': 'guided',
+    'frontmatter-bad-hosts': 'guided',
     'readme-missing-skill': 'guided', 'hud-bridge-missing-in-repo': 'guided',
     'repo-outdated': 'guided',
 }
@@ -648,6 +658,12 @@ function install(args) {
         const h = H[t]
         mkdirSync(h.skillsDir, { recursive: true })
         for (const s of repoSkills) {
+            // 宿主取舍：skill 声明了 hosts 且不含当前目标宿主 → 跳过（如 tvs-hud 只在 claude 有意义）
+            const allowedHosts = skillHosts(s)
+            if (allowedHosts && !allowedHosts.includes(t)) {
+                skipped.push(`${t}/${s} 为 ${allowedHosts.join('/')} 专用，已跳过`)
+                continue
+            }
             const src = join(SKILLS_DIR, s)
             const dst = join(h.skillsDir, s)
             const cur = installState(src, dst)
@@ -738,6 +754,13 @@ function checkFrontmatter(skillName) {
     const name = fm[1].match(/^name:\s*(\S+)/m)?.[1]
     if (name !== skillName) issues.push({ kind: 'frontmatter-name-mismatch', skill: skillName, found: name || null })
     if (!/^description:\s*\S/m.test(fm[1])) issues.push({ kind: 'frontmatter-no-description', skill: skillName })
+    // hosts 值校验：写了未知宿主名会导致该 skill 静默装不到任何地方，必须报出来
+    const hostsRaw = fm[1].match(/^hosts:\s*(.+)$/m)?.[1]
+    if (hostsRaw) {
+        const known = Object.keys(hosts())
+        const bad = hostsRaw.split(',').map((s) => s.trim()).filter(Boolean).filter((h) => !known.includes(h))
+        if (bad.length) issues.push({ kind: 'frontmatter-bad-hosts', skill: skillName, found: bad.join(',') })
+    }
     return issues
 }
 
@@ -759,10 +782,14 @@ function doctor(args) {
     for (const s of repoSkills) {
         issues.push(...checkScriptRefs(s))
         issues.push(...checkFrontmatter(s))
+        const allowedHosts = skillHosts(s)
+        // 宿主是否适用本 skill：声明了 hosts 且不含该宿主 = 不适用（修复动作要据此分叉）
+        const hostOk = (hostName) => !allowedHosts || allowedHosts.includes(hostName)
         for (const [hostName, info] of Object.entries(det.skills[s])) {
             if (info.state === 'copy-drift') {
                 issues.push({ kind: 'copy-drift', skill: s, host: hostName, diffFiles: info.diffFiles })
-                if (args.fix) {
+                // 装错宿主的漂移拷贝不回同步——它本就不该在这，交给 wrong-host-install 处理
+                if (args.fix && hostOk(hostName)) {
                     const h = hosts()[hostName]
                     rmSync(join(h.skillsDir, s), { recursive: true, force: true })
                     cpSync(join(SKILLS_DIR, s), join(h.skillsDir, s), { recursive: true, filter: (p) => !EXCLUDES.has(basename(p)) })
@@ -774,11 +801,27 @@ function doctor(args) {
                 if (args.fix) {
                     const h = hosts()[hostName]
                     removeInstalled(join(h.skillsDir, s))
-                    symlinkSync(resolve(join(SKILLS_DIR, s)), join(h.skillsDir, s), 'junction')
-                    fixes.push(`已重建 ${hostName}/${s} 软链`)
+                    if (hostOk(hostName)) {
+                        symlinkSync(resolve(join(SKILLS_DIR, s)), join(h.skillsDir, s), 'junction')
+                        fixes.push(`已重建 ${hostName}/${s} 软链`)
+                    } else {
+                        // 断链 + 装错宿主：重建等于把不适用的 skill 又装回去，正确动作是移除（死链无内容，移除无风险）
+                        fixes.push(`已移除装错宿主的断链 ${hostName}/${s}（该 skill 为 ${allowedHosts.join('/')} 专用）`)
+                    }
                 }
             }
             if (info.state === 'linked-elsewhere') issues.push({ kind: 'linked-elsewhere', skill: s, host: hostName, target: info.target })
+        }
+        // 装错宿主：skill 声明了 hosts，却安装在了不适用的宿主（历史存量或早期无过滤时装的）
+        if (allowedHosts) {
+            for (const [hostName, info] of Object.entries(det.skills[s])) {
+                if (allowedHosts.includes(hostName) || !INSTALLED_STATES.includes(info.state)) continue
+                issues.push({ kind: 'wrong-host-install', skill: s, host: hostName,
+                    hint: `该 skill 为 ${allowedHosts.join('/')} 专用，装在 ${hostName} 无用。repair --prune-wrong-host 可移除` })
+                if (args['prune-wrong-host']) {
+                    try { removeInstalled(join(hosts()[hostName].skillsDir, s)); fixes.push(`已移除装错宿主的 ${hostName}/${s}`) } catch { /* ignore */ }
+                }
+            }
         }
     }
     issues.push(...checkReadme(repoSkills))
@@ -1003,7 +1046,7 @@ function main() {
     else if (cmd === 'bootstrap') out = bootstrap()
     else if (cmd === 'set-superpowers-variant') out = setSuperpowersVariant(args)
     else {
-        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap|set-superpowers-variant> [--target claude,cursor] [--mode link|copy] [--only a,b] [--rules role,coding-rules|none] [--force] [--prune] [--prune-stale-claude] [--fix] [--pull] [--no-pull] [--variant original|zh]' }
+        out = { error: `未知命令: ${cmd || '(空)'}`, usage: 'node scripts/tvs.mjs <detect|install|doctor|repair|update|bootstrap|set-superpowers-variant> [--target claude,cursor] [--mode link|copy] [--only a,b] [--rules role,coding-rules|none] [--force] [--prune] [--prune-stale-claude] [--prune-wrong-host] [--fix] [--pull] [--no-pull] [--variant original|zh]' }
     }
     process.stdout.write(JSON.stringify(out, null, 2) + '\n')
     if (out.error) process.exit(1)

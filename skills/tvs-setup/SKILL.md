@@ -19,9 +19,9 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
 | 命令 | 作用 |
 |---|---|
 | `detect` | 宿主（claude/cursor）+ 每个 skill 的安装状态 + 孤儿目录 + 第三方生态探测 |
-| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--rules a,b\|none] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主。**`--rules`**＝选哪些个人规则注入 claude 全局 CLAUDE.md（见"可选规则"节）：不给＝保留现有选择、首装用 `default:on`；`--rules none` 全不装 |
+| `install [--target claude,cursor] [--mode link\|copy] [--only a,b] [--rules a,b\|none] [--force] [--prune] [--no-pull]` | 安装/更新；**开头自动拉取远程最新**（脏仓库自动跳过保护编辑，`--no-pull` 关闭）；**默认 copy**（消费者独立拷贝、无绝对路径泄漏）、`--mode link` 给作者改即生效（已软链的不显式 --mode 会保持软链）；默认所有已检测到的宿主。**按宿主取舍**：SKILL.md frontmatter 声明了 `hosts: claude`（或 cursor，逗号分隔，自注册同 rules）的 skill 只装到适用宿主，其余宿主跳过并在 summary 说明；未声明 = 全宿主通用。**`--rules`**＝选哪些个人规则注入 claude 全局 CLAUDE.md（见"可选规则"节）：不给＝保留现有选择、首装用 `default:on`；`--rules none` 全不装 |
 | `doctor [--fix]` | 只读体检：detect 全部内容 + 死脚本引用 + frontmatter + README 同步 + HUD 链路；**每个问题标 `fixClass`**（auto/auto-confirm/guided）；`--fix` 自动修复 auto 类（漂移/断链/HUD）。输出 `installForm`（当前安装形式）|
-| `repair [--prune] [--prune-stale-claude]` | **自愈入口** = `doctor --fix` + 破坏性清理（需显式 flag、先告知用户）：`--prune` 清孤儿、`--prune-stale-claude` 删"插件已装却又在 ~/.claude/skills 的旧目录安装"（mixed 形式去重，只删本仓库 skill、留用户自有）。可在插件形式下运行（自愈正需如此）|
+| `repair [--prune] [--prune-stale-claude] [--prune-wrong-host]` | **自愈入口** = `doctor --fix` + 破坏性清理（需显式 flag、先告知用户）：`--prune` 清孤儿、`--prune-stale-claude` 删"插件已装却又在 ~/.claude/skills 的旧目录安装"（mixed 形式去重，只删本仓库 skill、留用户自有）、`--prune-wrong-host` 删装错宿主的存量（如历史上装进 cursor 的 tvs-hud）。可在插件形式下运行（自愈正需如此）|
 | `update [--pull]` | 检查远程是否有新版本（落后时列出最近新提交）；`--pull` 执行更新（仅 fast-forward，仓库有未提交修改时拒绝） |
 | `bootstrap` | 插件消费者一次性自举：静默归一 `skillListingBudgetFraction=0.02` + 写 marker + 输出依赖安装计划（见下节"插件自举"）。由 SessionStart 钩子自动提示触发 |
 | `set-superpowers-variant --variant original\|zh` | 持久化用户选择的 superpowers 版本（合并写入 marker，不碰其余字段）；选完之后 detect/doctor/bootstrap 的 superpowers 建议命令跟着变，不再重复问 |
@@ -41,6 +41,7 @@ node "<skill-path>/scripts/tvs.mjs" <command> [flags]
    - `copy-drift`：本机拷贝与仓库不一致。**先判断方向**——如果用户刚改过仓库，是本机落后（可 `--fix` 同步）；如果用户可能在本机改过 skill，提醒先把修改合回仓库再 fix，不要静默覆盖。
    - `dead-script-ref` / `frontmatter-*` / `readme-missing-skill`：仓库本身的质量问题，需要修仓库文件，脚本不自动修。
    - `orphan`：仓库已删但本机还在的 tvs- 目录，确认后用 `install --prune` 清除。
+   - `wrong-host-install`：skill 声明了 `hosts` 却装在不适用的宿主（早期无过滤时装的存量），确认后用 `repair --prune-wrong-host` 移除。`frontmatter-bad-hosts` 则是 hosts 写了未知宿主名（会导致该 skill 静默装不到任何地方），需修仓库 frontmatter。
    - `broken-link` / `linked-elsewhere`：链接失效或指向别处（仓库被移动过），`--fix` 重建或重新 install。
    - `hud-bridge-not-installed` / `hud-bridge-drift` / `statusline-not-wired` / `statusline-missing-omc-hud-flag`：状态栏 HUD 接管链路断裂（详见下节），`--fix` 自动修复。`hud-bridge-missing-in-repo` 是仓库缺源文件，脚本不自动修，需补回 `skills/tvs-hud/hud/combined-status.mjs`。
    - `claude-dup-with-plugin`：CC 已装 `tvs-inksnow` 插件，且 tvs-setup 又往 `~/.claude/skills` 装过本仓库 skill → 重复。CC 建议交给插件：手动删 `~/.claude/skills/tvs-*`，或之后只 `install --target cursor`（脚本不自动删 claude skills，避免误伤用户自有内容）。

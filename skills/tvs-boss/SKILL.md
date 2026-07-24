@@ -2,6 +2,7 @@
 name: tvs-boss
 description: 多项目 AI 开发"老板/团队"系统——把你从挨个手动指挥多个 Claude 实例，提升为只下需求、拍板的团队负责人/架构师。敲 /tvs-boss：扫当前目录把团队拉起来，当前这个 chat 当场变成常驻 leader，一个 leader 调度，各项目独立 dev + 全队共享角色池，自动跑"分发→编码→审查→测试→提交"。当用户要"管多个项目的AI团队 / 起一个开发团队 / leader调度 / 多agent团队 / 让AI替我分发审查提交"时使用。
 disable-model-invocation: true
+hosts: claude
 ---
 
 # tvs-boss：多项目 AI 开发团队

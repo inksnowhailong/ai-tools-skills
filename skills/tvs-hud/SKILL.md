@@ -1,6 +1,7 @@
 ---
 name: tvs-hud
 description: 状态栏 HUD——自包含渲染，不依赖 omc 的 HUD/IPC。两行：Claude 用量（模型/上下文占比/5小时·每周用量）+ 当前目录分支状态与情绪脸。cwd 在某个 git 仓库内才展示分支信息，情绪脸随时展示。用户主动运行 /tvs-hud 查看接管状态或重新接管。
+hosts: claude
 disable-model-invocation: true
 ---
 

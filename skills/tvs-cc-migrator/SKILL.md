@@ -1,6 +1,7 @@
 ---
 name: tvs-cc-migrator
 description: 当用户提到备份配置、迁移 Claude Code、导出/恢复设置、换电脑、同步 ~/.claude 配置时使用。作用：备份和恢复 ~/.claude/ 下全部配置（CLAUDE.md、rules、skills、commands、agents、自定义插件、settings.json 等）。
+hosts: claude
 disable-model-invocation: true
 ---
 
