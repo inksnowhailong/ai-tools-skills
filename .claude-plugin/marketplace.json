@@ -1,13 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "tvs-inksnow",
-  "description": "inksnow 个人 AI 助手配置库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 文档审计等 17 个 skill",
+  "description": "inksnow 个人 AI 助手配置库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 路由、skill 文档审计等 18 个 skill",
   "owner": { "name": "inksnowhailong" },
   "plugins": [
     {
       "name": "tvs-inksnow",
       "description": "一套工具中性的 skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆系统等。",
-      "version": "0.9.1",
+      "version": "0.10.0",
       "author": { "name": "inksnowhailong" },
       "source": "./",
       "category": "productivity",
@@ -15,5 +15,5 @@
       "tags": ["skills", "tasks", "architecture", "code-review", "memory"]
     }
   ],
-  "version": "0.9.1"
+  "version": "0.10.0"
 }

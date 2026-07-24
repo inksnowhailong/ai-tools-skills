@@ -1,7 +1,7 @@
 {
   "name": "tvs-inksnow",
-  "version": "0.9.1",
-  "description": "工具中性的个人 AI skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 文档审计等 17 个 skill。",
+  "version": "0.10.0",
+  "description": "工具中性的个人 AI skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 路由、skill 文档审计等 18 个 skill。",
   "author": { "name": "inksnowhailong" },
   "repository": "https://github.com/inksnowhailong/ai-tools-skills",
   "homepage": "https://github.com/inksnowhailong/ai-tools-skills",
@@ -9,6 +9,7 @@
   "keywords": ["skills", "tasks", "architecture", "code-review", "memory"],
   "skills": [
     "./skills/tvs-analyze/",
+    "./skills/tvs-auto/",
     "./skills/tvs-architect/",
     "./skills/tvs-boss/",
     "./skills/tvs-cc-migrator/",
