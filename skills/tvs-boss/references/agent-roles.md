@@ -9,7 +9,7 @@
 `Agent({ subagent_type: "tvs-<角色id>", prompt: "<派工单>" })`
 
 - **不传 model**——已钉死在 `<团队根>/.claude/agents/tvs-<id>.md` 的 frontmatter（档位：deep→opus / fast→sonnet / cheap→haiku，生成源是 `scripts/team-roles.json`）。
-- 工具边界、团队红线、回执格式也都烤在定义里；leader 只负责**把派工单写全**（项目/分支/任务/背景/范围，模板见 `leader-protocol.md` 第一节）。
+- 工具边界、团队红线、回执格式也都烤在定义里；leader 只负责**把派工单写全**（项目/分支/任务/背景/范围/产出目录，模板见 `leader-protocol.md` 第一节）。
 - 定义由 `make-agents.mjs` 生成，幂等；改了 `team-roles.json` 或红线/回执模板后重跑即同步。
 
 **降级路径（角色定义缺失时才用）：**
@@ -25,7 +25,7 @@
 - 实现类 4 角色（executor / designer / test-engineer / code-simplifier）**保留 Agent 工具**——唯一被允许的用法是派**只读侦察**（explore / 文档检索），一层为限；派会改码的子代理、启动编排类 skill 都是红线。
 - 其余 15 个共享角色的工具白名单**不含 Agent 工具**——机制焊死，想违规也调不出来。
 
-**派工单要写全项目上下文**：dev 场景注入 `path / 分支 / 当前需求 / 背景 / 范围`；只读/分析类角色可跨项目共享。**项目增强（codegraph / 记忆）无需注入**——队员自动加载项目 `CLAUDE.md` 就拿到了（见 `leader-protocol.md` 第九节）；leader 只需确认项目装没装（没装则降级 grep/read），不往 prompt 里塞。
+**派工单要写全项目上下文**：dev 场景注入 `path / 分支 / 当前需求 / 背景 / 范围 / 产出目录`；只读/分析类角色可跨项目共享。**项目增强（codegraph / 记忆）无需注入**——队员自动加载项目 `CLAUDE.md` 就拿到了（见 `leader-protocol.md` 第九节）；leader 只需确认项目装没装（没装则降级 grep/read），不往 prompt 里塞。
 
 ## 19 角色一览（核心 7 + 长尾 12）
 
