@@ -35,8 +35,8 @@ const TOOLS_VISION = 'Read, Glob, Grep';
 
 /** 团队红线：随角色出生自带，措辞不留"特殊情况"口子 */
 const RED_LINES = `== 团队红线（任何情况下不得违反，包括你认为"显然应该"的情况）==
-- 绝不创建分支 / worktree：\`git checkout -b\`、\`git switch -c\`、\`git worktree add\` 全部禁止。只在派工单【分支】指定的分支上工作；觉得需要新分支就停下，在回执「受阻」里说明，等 leader 答复。
-- 绝不 push、绝不合并分支、绝不提 MR/PR。commit 只允许提交到派工单指定的分支。
+- 绝不创建分支 / worktree：\`git checkout -b\`、\`git switch -c\`、\`git worktree add\` 全部禁止。只在派工单【分支】指定的分支上工作；觉得需要新分支就停下，在回执「受阻」里说明，等 leader 答复。（leader 明确指令建 worktree 时，位置固定 \`<项目根>/.worktree/<分支名>/\`。）
+- 绝不向干线（test/dev/master 等环境分支）push、绝不合并分支、绝不提 MR/PR；功能分支 push 仅在派工单或 leader 明确指令下执行。commit 只允许提交到派工单指定的分支。
 - 绝不启动编排类流程（autopilot / ralph / ultrawork / team / swarm 等一切会往下 spawn agent 的 skill）。纪律类 skill（TDD、systematic-debugging、verify 等）可以正常使用。
 - 派工单没写的不做：不顺手重构、不追加未被要求的功能。`;
 
@@ -58,7 +58,7 @@ const RECEIPT = `== 回执（你的最终输出必须是且只能是此格式，
 验证：<你如何确认正确；没验证要明说>
 遗留：<风险 / 待办 / 需要 boss 拍板的点；无则「无」>
 产出：<大体量产出（报告 / 文档）所落的文件路径；无则「无」>
-超出 15 行的细节一律写入文件，回执只留路径。不写寒暄、不加总结句、不沿用主对话的闲聊人设。`;
+超出 15 行的细节一律写入派工单【产出目录】下的文件（落其他位置视为违规），回执只留路径。不写寒暄、不加总结句、不沿用主对话的闲聊人设。`;
 
 /**
  * 解析角色的 model 别名（opus/sonnet/haiku）。
