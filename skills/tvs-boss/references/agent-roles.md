@@ -27,34 +27,19 @@
 
 **派工单要写全项目上下文**：dev 场景注入 `path / 分支 / 当前需求 / 背景 / 范围`；只读/分析类角色可跨项目共享。**项目增强（codegraph / 记忆）无需注入**——队员自动加载项目 `CLAUDE.md` 就拿到了（见 `leader-protocol.md` 第九节）；leader 只需确认项目装没装（没装则降级 grep/read），不往 prompt 里塞。
 
-## 19 角色一览
+## 19 角色一览（核心 7 + 长尾 12）
 
-**实现类**（可改码；服务项目时即"dev"）
-- `executor` 实现者 —— 把确认方案落成最小、最清晰的改动
-- `designer` 前端设计 —— 组件/交互/状态机/边缘情况
-- `test-engineer` TDD 工程师 —— 红绿重构，先写失败用例
-- `code-simplifier` 代码简化 —— 不改行为前提下化繁为简
+**核心角色（日常 90% 的活）：**
+- `executor` 实现者 —— 把确认方案落成最小、最清晰的改动（实现类）
+- `designer` 前端设计 —— 组件/交互/状态机/边缘情况（实现类）
+- `test-engineer` TDD 工程师 —— 红绿重构，先写失败用例（实现类）
+- `explore` 代码勘察 —— 定位文件/符号/调用链（只读）
+- `planner` 战略规划 —— 大目标拆成可交付阶段；重任务拆解产出子任务图（每条含 范围=互斥文件簇 / 依赖 / 验收标准，见 `leader-protocol.md` 第十一节）（只读）
+- `code-reviewer` 代码审查 —— diff 的可读性/影响/契约/回归（只读）
+- `debugger` 调试 —— 定位编译/运行时/CI 错误并提修复（只读）
 
-**分析/规划类**（只读，给判断不动手）
-- `architect` 架构师 —— 边界、依赖方向、复杂度治理
-- `planner` 战略规划 —— 大目标拆成可交付阶段；重任务拆解时产出子任务图（每条含 范围=互斥文件簇 / 依赖 / 验收标准，见 `leader-protocol.md` 第十一节）
-- `analyst` 前期分析 —— 动手前理清需求/约束/未知
-- `critic` 毒舌审查 —— 主动找方案最致命的几个问题
-- `explore` 代码勘察 —— 定位文件/符号/调用链
-- `tracer` 追踪 —— 从现象反推根因，画因果链
-- `scientist` 数据科学 —— 数据分析/统计/实验设计
-
-**质量/安全类**（只读，给问题不动手）
-- `code-reviewer` 代码审查 —— diff 的可读性/影响/契约/回归
-- `security-reviewer` 安全审查 —— 权限/注入/泄露/越权/依赖
-- `qa-tester` 测试 —— 设计正向/异常/边界场景，可写测试脚本
-- `debugger` 调试 —— 定位编译/运行时/CI 错误并提修复
-
-**支持类**
-- `writer` 撰写 —— 文档/注释/changelog/提交信息/文案
-- `document-specialist` 文档研究 —— 通读仓库内文档整理可信结论
-- `vision` 视觉理解 —— 解读截图/设计稿/图表
-- `git-master` Git 操作 —— 分支/合并/rebase/worktree
+**长尾角色（按需点用，完整定义见 `scripts/team-roles.json`）：**
+`code-simplifier`(化繁为简·实现类) / `architect`(架构边界) / `analyst`(前期分析) / `critic`(毒舌审查) / `tracer`(根因因果链) / `scientist`(数据分析) / `security-reviewer`(安全审查) / `qa-tester`(测试场景) / `writer`(文档文案) / `document-specialist`(仓库文档研究) / `vision`(截图/设计稿解读) / `git-master`(分支/合并/worktree 操作)
 
 ## 通用硬边界（盖在所有角色之上）
 
