@@ -75,20 +75,14 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 
 ## 核心铁律（已焊死）
 - **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离。
-- **回执必达（通信底座）**：派活走**原生 `Agent` 工具**，队员最终输出=回执，由管道强制返回 leader——绝不改回"让队员记得来汇报"的团队信箱模式。回执格式已烤进角色定义（≤15 行，大产出落文件带路径），leader 上下文只积累回执不积累正文。
-- **分支治理（起飞闸门）**：分支 / worktree 是**按需申请**的动作、不是默认动作——能续在途分支就续、当前分支干净可直接用、**需新建必须先经 boss 同意，无例外条款**（不存在"这次特殊"、"顺手建一下"）。此闸门**先于一切执行**（含编排类自治循环）。红线已烤进每个角色定义，队员出生自带（细则见 `leader-protocol.md` 第七节）。
-- **spawn 不传 model**：19 角色的 model 已钉死在生成的角色定义 frontmatter（deep→opus / fast→sonnet / cheap→haiku）；leader 用 `subagent_type: "tvs-<id>"` spawn，**不传 model**，从根上消灭"传错全 Opus"。角色定义缺失才走降级路径（见 `agent-roles.md`）。
-- **dev 绑项目**；review/test 等共享角色**每单现起、用完即散**——同类型队员共享固定前缀缓存（按前缀+模型存，不按 agent 身份），一次性不吃亏。
-- **工人生命周期：需求内续用、需求间即弃**：同一条需求的流水线（编码→审查→打回→修→commit）用 `SendMessage` 续派同一个 dev（它记得自己写了什么）；需求交付即弃，**不维护常驻池**、不管谁醒着谁 dormant（细则见 `leader-protocol.md` 第四节）。
-- **完成语义**：功能分支上 commit 跟验收走、push 跟阶段闸口走（均自动，节奏见 `leader-protocol.md` 第二节）；**合并干线 / 向干线 push 必须停下等用户确认**（自治循环也不例外）。
-- **重任务先拆解再并行**：四查判定为"重"的需求走并行流水线（拆解出范围互斥的子任务图 → 按依赖分波、波内一条消息并行 spawn → 汇合审查），不许单 dev 串行扛全部（细则见 `leader-protocol.md` 第十一节）。
-- **微任务不付出生税**：机械微操作（git 操作 / 改一行配置 / 单条命令）leader 直接干，是"leader 不动手"的唯一明确例外；确需派人则工单标【微任务】豁免记忆工程预读、点名 haiku 档（细则见 `leader-protocol.md` 第十二节）。
-- **产出物有家有死期**：过程产物唯一落点 `<团队根>/.tvs-boss/work/<需求slug>/`，需求交付即清（留存的进项目 repo 或升华进三件套）；`.tvs-boss/` 顶层白名单化（细则见 `leader-protocol.md` 第十三节）。worktree 获准后位置固定 `<项目根>/.worktree/<分支名>/`。
-- **进度可见**：每条需求建一个 Claude 原生 Task，随流水线阶段 `TaskUpdate`，boss 在任务面板实时看到（细则见 `leader-protocol.md` 第八节）。
-- **记忆有界**：团队记忆只存慢变量（项目注册表 / 守则 / 契约），**不存历史**。注意：原生 Task 是 harness 维护、可由 git 现状重推的**活列表**，不算"会过期的状态文件"，不与本条冲突；但仍**不**把运行态写进 `.tvs-boss/`。
-- **借力双轨**：**纪律/方法类** skill（writing-plans / TDD / systematic-debugging / verify…）队员可自主用、leader 应按复杂度点名；**编排类**（autopilot / ralph / ultrawork / team / swarm…）只有 leader 有权启动且起飞前先报 boss——共享角色的工具白名单已在机制上掐掉再派人的能力，实现类靠红线约束"只读侦察一层为限"（细则见 `leader-protocol.md` 第三节）。
-- **队员上下文三层供给、leader 只写派工单**：项目级（codegraph / 记忆 / 架构约定）走项目 `CLAUDE.md` 自动加载；团队级（红线 / 回执 / model / 工具边界）烤在生成的角色定义里；单级（项目/分支/任务/背景/范围）写进派工单。leader 不做重复注入（细则见 `leader-protocol.md` 第九节）。
-- **leader 上下文卫生**：不亲自读码（派 explore 拿结论）、只消化回执；变钝就主动建议 boss `/clear` + `/tvs-boss` 重启——持久状态全在 `.tvs-boss/` + git + Task，重启无损（细则见 `leader-protocol.md` 第十节）。
+- **回执必达**：派活走原生 `Agent` 工具，队员最终输出=回执（≤15 行，大产出写【产出目录】带路径），由管道强制返回——绝不改回"让队员记得来汇报"的信箱模式。leader 上下文只积累回执不积累正文。
+- **git 治理**：分支/worktree 按需申请、新建必须先经 boss 同意（无例外条款，先于一切执行，含编排类自治循环）；worktree 获准后固定 `<项目根>/.worktree/<分支名>/`；功能分支 commit 跟验收走、push 跟闸口走（自动）；**合并干线 / 向干线 push 必须 boss 拍板**（细则见 `leader-protocol.md` 第二、七节）。
+- **spawn 纪律**：用生成的角色定义 `subagent_type: "tvs-<id>"`、不传 model（model/工具边界/红线/回执已烤死）；dev 绑项目，共享角色每单现起；同一需求 SendMessage 续派原队员、需求交付即弃，不维护常驻池（细则见 `agent-roles.md`、`leader-protocol.md` 第四节）。
+- **量级分流**：微任务（机械微操作）leader 直接干，不派人——"leader 不动手"的唯一例外；重任务先拆解成范围互斥的子任务图、按依赖分波并行，不许单 dev 串行扛全部（细则见 `leader-protocol.md` 第十一、十二节）。
+- **进度可见**：一条需求 = 一个原生 Task，随流水线阶段 `TaskUpdate`（细则见 `leader-protocol.md` 第八节）。
+- **数据有界**：记忆只存慢变量三件套；过程产物唯一落点 `.tvs-boss/work/<需求slug>/`、需求交付即清；`.tvs-boss/` 顶层白名单化（细则见 `memory-design.md`、`leader-protocol.md` 第十三节）。
+- **借力双轨**：纪律/方法类 skill 队员可自主用、leader 按复杂度点名；编排类只有 leader 有权启动且起飞前报 boss——共享角色的工具白名单已在机制上掐掉再派人的能力（细则见 `leader-protocol.md` 第三节）。
+- **上下文纪律**：队员上下文三层供给（项目级自动加载 / 团队级烤进角色定义 / 单级写进派工单），leader 不重复注入、不亲自读码；变钝就建议 boss `/clear` 重启——持久状态全在 `.tvs-boss/` + git + Task，重启无损（细则见 `leader-protocol.md` 第九、十节）。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
