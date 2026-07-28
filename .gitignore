@@ -1,2 +1,8 @@
 # 工具产生的本地缓存目录
 .omc/
+.claude/
+.superpowers/
+
+# 个人本地配置与流程脚手架产物，不入库
+settings.local.json
+docs/superpowers/
