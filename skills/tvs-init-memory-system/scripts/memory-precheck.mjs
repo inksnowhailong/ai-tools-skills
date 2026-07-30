@@ -25,6 +25,10 @@
  *      `<!-- mem-meta: {...} -->` 里；当前分支 HEAD 已被该锚点 head 覆盖则跳过（团队成员 pull 即共享）。
  *   9. 防膨胀信号 —— 统计 `.memory/**.md` 体积，单文件/总量超阈值即在提示里追加精简建议（零 AI）。
  *  10. lint 增 changelog 检测 —— `--lint-memory` 额外扫描"本次改了什么"式 changelog 噪音。
+ *
+ *   ── v6 增量 ──
+ *  11. SessionStart 索引注入 —— `--print-index` 输出 .memory/记忆索引.md 全文（Claude Code 的
+ *      SessionStart hook stdout 会注入会话上下文），把"应该读索引"变为确定性注入。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -610,10 +614,18 @@ function commandLintMemory() {
     process.exit(ok ? 0 : 1)
 }
 
+/** SessionStart 注入：输出记忆索引全文作为会话上下文；索引缺失时静默成功（未部署 .memory 的仓库不报错） */
+function commandPrintIndex() {
+    const indexFile = resolve(process.cwd(), '.memory', '记忆索引.md')
+    if (!existsSync(indexFile)) return
+    process.stdout.write(readFileSync(indexFile, 'utf8'))
+}
+
 function main() {
     const argv = process.argv.slice(2)
     const stateFile = resolve(STATE_FILE)
 
+    if (argv.includes('--print-index')) return commandPrintIndex()
     if (argv.includes('--mark-done')) return commandMarkDone(stateFile)
     if (argv.includes('--reset')) return commandReset(stateFile)
     if (argv.includes('--status')) return commandStatus(stateFile)
