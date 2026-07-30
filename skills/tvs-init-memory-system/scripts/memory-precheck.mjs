@@ -163,7 +163,7 @@ const CONFIG = {
     staleMaintenanceDays: 14,
     /** 单个 .memory md 文件软上限（字节）；超过即在提示里追加"该文件膨胀了考虑精简" */
     memoryFileSoftLimitBytes: 8192,
-    /** .memory md 总量软上限（字节）；v5 账本模型收紧到 32KB（只存不可推导知识，超了说明混进了可推导内容） */
+    /** .memory md 总量软上限（字节）；v5 起账本模型收紧到 32KB（只存不可推导知识，超了说明混进了可推导内容） */
     memoryTotalSoftLimitBytes: 32768,
     /** v5：lint 超龄复审——文件超过此天数未更新即标记"提请复审"（实时性兜底） */
     lintStaleFileDays: 180,
@@ -388,7 +388,7 @@ function buildMessage({ deltaFiles, reasons, sizeInfo }) {
         '记忆维护要求：',
         '- `.memory/**` 写入必须在 `project-memory-maintainer` 后台子 Agent 内完成，主 Agent 禁止直接编辑 `.memory/**`。',
         '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
-        '- v5 账本模型：只维护四类不可推导知识——业务导航（术语↔入口）、决策日志（append-only，为什么）、红线与约定、跨分支地图。',
+        '- v6 账本模型：只维护五类不可推导知识——业务导航（术语↔入口）、决策日志（append-only，为什么）、红线与约定、跨分支地图、墓碑（证伪认知防复发）。',
         '- 写入黑名单：模块职责描述、业务流程叙述、数据契约、函数签名/参数、调用关系、纯路径罗列（无业务词锚定）、代码注释转述、临时进度/TODO、changelog 式"本次改了什么"——可推导内容查 codegraph 或源码，不进记忆。',
         '- 本轮若没有新决策、新红线、导航变化（新能力/新叫法/入口迁移），直接 no-op——这是预期常态，不要硬写。',
         '- 维护后同步更新本文件（跨分支在研功能地图.md）的人读表格：功能 / 分支 / 负责人（git user.name）/ 状态 / 上次维护。',
