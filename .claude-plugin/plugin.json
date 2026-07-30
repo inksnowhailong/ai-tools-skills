@@ -24,7 +24,6 @@
     "./skills/tvs-setup/",
     "./skills/tvs-skill-audit/",
     "./skills/tvs-task/",
-    "./skills/tvs-team-spawn/",
-    "./skills/tvs-domain/"
+    "./skills/tvs-team-spawn/"
   ]
 }

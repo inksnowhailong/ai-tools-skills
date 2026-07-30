@@ -47,12 +47,19 @@ Claude Code 的 hook schema 与 Cursor 不同（事件名首字母大写、`hook
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command", "command": "node .claude/hooks/memory-precheck.mjs" } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node .claude/hooks/memory-precheck.mjs --print-index" } ] }
     ]
   }
 }
 ```
 
 `.claude/settings.json` 可入库随仓库走（团队共享）。已存在则合并对应事件数组。
+
+> **SessionStart 索引注入（v6，仅 Claude Code）**：SessionStart hook 的 stdout 会作为
+> additionalContext 注入会话开头，把"应该读索引"从赌模型自觉变为确定性注入。
+> Cursor / Codex 无等价的上下文注入语义，维持宪法引导读取，不注册此事件。
 
 ### Codex → `.codex/config.toml` + `.codex/hooks.json`
 
