@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * memory.mjs — tvs-mind-seed 单 agent 记忆初始化运行时。
+ * memory.mjs — tvs-team-spawn 的 mind-seed 子流程（单 agent 记忆初始化）运行时。
  *
  * 用法：
  *   node memory.mjs <command> [args...] [--flag value]
@@ -164,7 +164,7 @@ function fileFor(ws, agent, key) {
  * Default markdown skeletons
  *
  * 这两个 md 在 ensure-root 时就写入默认骨架；JSON 文件（profile/personality/
- * active）由 tvs-mind-seed SKILL 在对话引导后通过 write-* 命令传入完整内容，
+ * active）由 mind-seed 子流程在对话引导后通过 write-* 命令传入完整内容，
  * 不在 ensure-root 阶段创建。
  * ========================================================================= */
 

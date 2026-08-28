@@ -1,18 +1,8 @@
----
-name: tvs-mind-seed
-description: 当用户要为某个 agent/chat 初始化私有记忆（初始化记忆、mind seed、给成员建记忆），或 tvs-team-spawn 部署完团队后为成员建记忆时使用。定位：随 tvs-team-spawn 主要服务 Cursor 团队场景；Claude Code 下的独立 chat 记忆建议优先用其原生记忆能力。作用：对话引导收集角色定位、关注点、沟通风格、边界，生成精简三件套（identity/memory-active/memory-raw）JSON；chat 崩溃后再开可读回恢复。
-disable-model-invocation: true
----
+# mind-seed 子流程：单 Agent 记忆初始化
 
-# tvs-mind-seed：单 Agent 记忆初始化
+（tvs-team-spawn 的内置子流程，经 `/tvs-team-spawn mind-seed <agent>` 或用户说"给 X 建记忆/初始化记忆"进入。定位：主要服务 Cursor 团队场景；Claude Code 下的独立 chat 记忆建议优先用其原生记忆能力。）
 
 为一个 chat 装上可跨 chat 崩溃恢复的私有记忆。完成后该 chat 即使被关掉再开，下一次启动也能读回画像、人设、活跃边界。
-
-## 调用方式
-
-```text
-/tvs-mind-seed <agent>
-```
 
 `<agent>` 是该 chat 对应的身份标识。常见值：
 
@@ -22,7 +12,7 @@ disable-model-invocation: true
 
 ## 这次初始化的边界
 
-你被显式调用来**一次性建立**当前 chat 的私有记忆。完成后立刻退出，不主动维护记忆，也不替 agent 干活。
+你被显式调用来**一次性建立**当前 chat 的私有记忆。完成后立刻退出，不主动维护记忆，也不替 agent 干活，也不进入 tvs-team-spawn 的团队部署流程。
 
 会做的事：
 
@@ -44,7 +34,7 @@ disable-model-invocation: true
 node "<skill-path>/scripts/memory.mjs" <command> <workspace> <agent> [--flag value]
 ```
 
-`<skill-path>` 用你所在 IDE 提供的 skill 路径动态解析，不要硬编码。
+`<skill-path>` 是 **tvs-team-spawn** 的 skill 根目录（memory.mjs 与 team.mjs 同在其 `scripts/` 下），用你所在 IDE 提供的 skill 路径动态解析，不要硬编码。
 
 **目标 IDE（target）**：记忆必须落在和团队一致的目录（cursor→`.cursor/.team`、claude→`.claude/.team`），否则团队 skill 读不到。runtime 会自动探测已部署的 `.team/` 目录——**团队场景无需传 target**。仅当为「无团队的独立 chat」首次建记忆、且你运行在 Claude Code 时，给命令加 `--target claude`（否则默认 cursor）。下文 `.cursor/.team/...` 路径在 claude target 下都对应 `.claude/.team/...`。
 
@@ -54,7 +44,7 @@ node "<skill-path>/scripts/memory.mjs" <command> <workspace> <agent> [--flag val
 
 #### 0.1 没传 agent 名
 
-如果用户调用 `/tvs-mind-seed` 没有参数，先列出当前项目已经存在的 agents（如果有），让用户选或新建：
+如果进入本子流程时没带 agent 名，先列出当前项目已经存在的 agents（如果有），让用户选或新建：
 
 ```bash
 node "<skill-path>/scripts/memory.mjs" list-agents "<workspace>"
@@ -240,7 +230,7 @@ node "<skill-path>/scripts/memory.mjs" write-active "<workspace>" "<agent>" --ac
 
 | 文件 | 角色 | 谁写 | 何时读 |
 |---|---|---|---|
-| identity.json | 静态身份画像：定位、关注、边界、人设、沟通风格（合并了旧 profile+personality） | tvs-mind-seed 一次性写，偶尔更新 | **仅首次进入 / 崩溃恢复读一次** |
+| identity.json | 静态身份画像：定位、关注、边界、人设、沟通风格（合并了旧 profile+personality） | mind-seed 子流程一次性写，偶尔更新 | **仅首次进入 / 崩溃恢复读一次** |
 | memory-active.json | 当前活跃约束 + ongoingTasks + lastSeenBlackboardHashes | agent 工作中按需更新 | **每轮唤醒都读（很小）** |
 | memory-raw.md | 候选记忆池，待整理 | agent 工作中追加 | 整理时输入 |
 | （懒创建）index / sources / consolidated | 长期索引 / 证据 / 摘要 | 未来的整理流程 | 有了再说 |

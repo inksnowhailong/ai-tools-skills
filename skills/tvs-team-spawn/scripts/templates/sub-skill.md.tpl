@@ -60,7 +60,7 @@ node "{{scriptDir}}/team.mjs" bind {{subName}}
 读取 `{{teamDir}}/memory/{{subName}}/identity.json`（精简记忆三件套之一：身份画像，静态）：
 
 - 存在 → 读入它 + `memory-active.json`，进下一步。
-- 不存在 → 提示用户：「我还没有自己的记忆，先在这个 chat 跑 `/tvs-mind-seed {{subName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
+- 不存在 → 提示用户：「我还没有自己的记忆，先在这个 chat 跑 `/tvs-team-spawn mind-seed {{subName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
 
 **identity 是静态画像，只在首次进入 / 崩溃恢复时读一次**，不要每轮 stop 唤醒都重读。兼容旧部署：没有 identity.json 时回退读 profile.json + personality.json。
 
@@ -237,6 +237,6 @@ worktree 字段是 null 时，在主项目目录工作。
 
 ## 角色记忆提示（生成 memory 时参考）
 
-调用 /tvs-mind-seed 初始化你的记忆时，可以参考以下提示作为该角色的稳定优先项：
+跑 `/tvs-team-spawn mind-seed` 初始化你的记忆时，可以参考以下提示作为该角色的稳定优先项：
 
 {{memoryHintsBullet}}

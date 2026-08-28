@@ -1,11 +1,16 @@
 ---
 name: tvs-team-spawn
-description: 当用户提到"建一个团队、多 agent 协作、主从 chat、sub agent、leader 编排、邮箱通信、团队 chat、团队工作流"时使用。定位：主战场是 Cursor（无原生多 agent 编排）；Claude Code 已有原生 teams，应先提示用户优先原生方案。作用：对话收集团队规模与目标，从 19 个核心角色推荐配比，生成 leader/sub skill、maildir 邮箱、单写多读黑板、按事件唤醒的 stop hook；worktree 由 leader 按需建立。
+description: 当用户提到"建一个团队、多 agent 协作、主从 chat、sub agent、leader 编排、邮箱通信、团队 chat、团队工作流"，或要为某个 agent/chat 初始化私有记忆（初始化记忆、mind seed、给成员建记忆）时使用。定位：主战场是 Cursor（无原生多 agent 编排）；Claude Code 已有原生 teams，应先提示用户优先原生方案。作用：对话收集团队规模与目标，从 19 个核心角色推荐配比，生成 leader/sub skill、maildir 邮箱、单写多读黑板、按事件唤醒的 stop hook；worktree 由 leader 按需建立。内置 mind-seed 子流程（/tvs-team-spawn mind-seed <agent>）为成员建三件套私有记忆。
 disable-model-invocation: true
 hosts: cursor
 ---
 
 # tvs-team-spawn：多 Agent 团队构建
+
+## 子流程路由（最先判断）
+
+- 调用形如 `/tvs-team-spawn mind-seed [agent]`，或用户意图是"给某个 agent/chat 建/初始化私有记忆"（而不是部署团队）→ **不走下面的部署流程**，读本 skill 的 `references/mind-seed.md` 并严格照做（运行时是同目录的 `scripts/memory.mjs`）。
+- 其余情况 → 团队部署，继续往下。
 
 ## 宿主定位（开始前先看这个）
 
@@ -26,14 +31,14 @@ hosts: cursor
 - 只有 leader 能写黑板（团队公共上下文），所有人都能读
 - 任何代码型产出默认走 Critic 链（实现者 → 审查者）
 - worktree 隔离按需启用，避免多 sub 改同一份代码冲突
-- 每个 agent 有自己的私有记忆（通过 `/tvs-mind-seed` 单独初始化）
+- 每个 agent 有自己的私有记忆（通过 `/tvs-team-spawn mind-seed <agent>` 在各自 chat 单独初始化）
 
 跑完不会做的事：
 
 - 不会自动启动任何 chat
 - 不会建任何 git worktree（那由 leader 在工作中按需调用）
 - 不会写任何业务代码
-- 不会调用 `/tvs-mind-seed`（每个成员的记忆要分别由该 chat 自己跑一次）
+- 不会替成员跑 mind-seed 子流程（每个成员的记忆要分别在该成员自己的 chat 里跑一次）
 
 ## 前置检查
 
@@ -259,7 +264,7 @@ node "<skill-path>/scripts/team.mjs" ensure-team --workspace "<workspace>" --tea
 │   ├── decisions.jsonl
 │   └── conventions.md       （骨架）
 ├── memory/
-│   └── leader/              leader 私有记忆目录（空，等 /tvs-mind-seed 填充）
+│   └── leader/              leader 私有记忆目录（空，等 mind-seed 子流程填充）
 ├── worktrees/               git worktree 根目录（空）
 └── watchers/                watcher PID 文件目录（空）
 ```
@@ -294,7 +299,7 @@ node "<skill-path>/scripts/team.mjs" generate-leader --workspace "<workspace>"
 - Critic 链编排规则
 - 黑板写入规则
 - Worktree 管理
-- 与 tvs-mind-seed 配合
+- 与 mind-seed 子流程配合
 - 隐藏内部机制规则
 - 退出 / 暂停流程
 
@@ -379,11 +384,11 @@ node "<skill-path>/scripts/team.mjs" generate-stop-hook --workspace "<workspace>
 下一步你要手动做：
 
 1. 开一个新的专用 chat 给 leader，在里面输入 `/team-leader-<teamName>`。
-   leader skill 启动后会引导你跑 `/tvs-mind-seed leader` 给 leader 装上私有记忆。
+   leader skill 启动后会引导你跑 `/tvs-team-spawn mind-seed leader` 给 leader 装上私有记忆。
 
 2. 对每个 sub，开一个专用 chat（建议在 chat 标题前加 sub 名字方便辨认），
    在里面输入对应的 skill（例如 `/sub-architect`）。
-   sub skill 启动后会引导你跑 `/tvs-mind-seed sub-architect` 装上私有记忆。
+   sub skill 启动后会引导你跑 `/tvs-team-spawn mind-seed sub-architect` 装上私有记忆。
 
 3. 所有成员的 chat 都接好后，回到 leader chat 给它布置第一个任务。
    leader 会自己派给合适的 sub。
@@ -392,7 +397,7 @@ node "<skill-path>/scripts/team.mjs" generate-stop-hook --workspace "<workspace>
 私有记忆和邮箱里的未读消息都在文件里保留着。
 ```
 
-不要主动启动任何 chat，也不要替用户调用 `/tvs-mind-seed`。
+不要主动启动任何 chat，也不要替用户跑 mind-seed 子流程。
 
 ## 推荐配比的判断逻辑
 

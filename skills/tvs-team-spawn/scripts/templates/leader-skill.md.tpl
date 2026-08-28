@@ -82,7 +82,7 @@ node "{{scriptDir}}/team.mjs" bind {{leaderName}}
 读取 `{{teamDir}}/memory/{{leaderName}}/identity.json`（精简记忆三件套之一：身份画像，静态）：
 
 - 存在 → 读入它 + `memory-active.json`（硬约束），进下一步。
-- 不存在 → 提示用户：「leader 还没有自己的记忆，先在当前 chat 跑 `/tvs-mind-seed {{leaderName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
+- 不存在 → 提示用户：「leader 还没有自己的记忆，先在当前 chat 跑 `/tvs-team-spawn mind-seed {{leaderName}}` 把记忆建起来再来找我。」然后停下等用户操作完再继续。
 
 **identity 是静态画像，只在首次进入 / 崩溃恢复时读一次**，不要每轮 stop 唤醒都重读（省 token）。兼容旧部署：没有 identity.json 时回退读 profile.json + personality.json。
 
@@ -285,13 +285,13 @@ node "{{scriptDir}}/team.mjs" worktree-assign <subName> "<绝对路径>"
 
 派任务时 `worktree` 字段填写要使用的 worktree subName（不是绝对路径）。
 
-## 与 tvs-mind-seed 的配合
+## 与 mind-seed 子流程的配合
 
 你和每个 sub 都有自己的私有记忆目录 `{{teamDir}}/memory/<agent>/`。这是你跨 chat 崩溃后还能"想起以前在做什么"的唯一保险。
 
 写入规则（精简三件套 identity / active / raw）：
 
-- identity.json（身份画像）+ memory-active.json（硬约束 / ongoingTasks / lastSeenBlackboardHashes）由 tvs-mind-seed 引导式生成。
+- identity.json（身份画像）+ memory-active.json（硬约束 / ongoingTasks / lastSeenBlackboardHashes）由 tvs-team-spawn 的 mind-seed 子流程引导式生成。
 - memory-raw.md 由你或 sub 在工作中追加候选条目，格式：
 
 ```markdown
