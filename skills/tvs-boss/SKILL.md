@@ -26,25 +26,20 @@ hosts: claude
 
 ### 3. 引导建团（仅新团队 / 空记忆时）
 1. **扫当前目录找项目**：列出当前目录下所有**含 `.git` 的直接子目录**；若**当前目录自身**就是个 git 仓库，它也作为一个候选。把候选列给用户**勾选**——勾中的才纳管，不替用户猜。
-2. 把勾中的项目写进 `.tvs-boss/projects.md`（每个：`id / path / repo / 主分支`，见 `references/memory-design.md` 的格式）；顺带问一句每个项目的**测试/预发布/生产分支**分别是什么（面板"项目"屏要用它算 ahead/behind），**不确定的留空即可，绝不替用户猜**——留空面板会照实展示"欠缺"，猜错比欠缺更危险（细则见 `references/memory-design.md` 环境分支三件套一节）。
+2. 把勾中的项目写进 `.tvs-boss/projects.md`（每个：`id / path / repo / 主分支`，见 `references/memory-design.md` 的格式）；顺带问一句每个项目的**测试/预发布/生产分支**分别是什么（leader 判断"合到哪/离上线多远"要用），**不确定的留空即可，绝不替用户猜**——猜错比欠缺更危险（细则见 `references/memory-design.md` 环境分支三件套一节）。
 3. **守则预填默认项**：把 `references/default-rules.md` 里的默认通用守则原样写入 `.tvs-boss/rules.md` 的"通用守则（全队）"段（都是平台无关的协作纪律，不含项目细节）；再问一句还有没有要**追加/改**的（如"push/合主线必先确认"已在默认项里，无需重复问）。项目专属红线（如"某项目主线是 develop 而非 main"）问用户后写进"各项目附加红线"段。
 4. 宣布"团队就位，我是 leader，下需求吧"。
 
-### 4. 生成面板启动器 + 角色定义（建团 / 恢复 都做，幂等）
-定位到团队根后，跑两个生成脚本：
+### 4. 生成角色定义（建团 / 恢复 都做，幂等）
+定位到团队根后，跑生成脚本：
 
 ```
-node "$SKILL/scripts/make-launcher.mjs" --root "<团队根>"
 node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 ```
 
 **make-agents.mjs**：从 `scripts/team-roles.json` 生成 19 个角色定义到 `<团队根>/.claude/agents/tvs-*.md`。model、工具边界（15 个共享角色无 Agent 工具）、团队红线（分支/push/编排禁令）、回执模板全部**烤死在定义里**——这些是机制约束，不依赖 leader 每次自觉；升级 skill 或改守则后重跑即同步。spawn 用 `subagent_type: "tvs-<角色id>"`，**不传 model**。
 
-**make-launcher.mjs**：面板一键启动器——
-
-- 往 `<团队根>/.tvs-boss/` 写 `panel.cmd`（Windows）和 `panel.command`（mac）；已存在直接覆盖，幂等。
-- 启动器是「薄壳」，**运行时**自定位两样：团队根（`%~dp0` / `$(dirname)`）+ 本机 skill 里的 `open-panel.mjs`（探 `~/.claude` → `~/.cursor`）。**零绝对路径**——所以团队目录同步给别人、换台机器（只要对方本机也装了 tvs-boss）双击即用，不会再出现指向生成机路径的"缺少 js 文件"。
-- 告诉用户："面板启动器已就位，双击 `<团队根>\.tvs-boss\panel.cmd`（mac 为 `panel.command`）即可开看板。"
+发现团队根 `.tvs-boss/` 下有历史遗留的 `panel.cmd` / `panel.command`（旧版面板启动器，已移除）→ 顺手删掉。
 
 ### 4.5 维护团队简报到团队根 CLAUDE.md（建团 / 恢复 都做，幂等）
 
@@ -68,7 +63,7 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 ### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
-> **boss 说"看面板 / 打开面板 / 开看板"时**：leader 直接跑 `node "$SKILL/scripts/open-panel.mjs" --root "<团队根>"` 替 boss 把面板弹出来（跨平台自动开窗：Win 优先 Windows Terminal、否则 PowerShell；mac 用 Terminal.app；linux 用 $TERMINAL 兜底）。**不要让 boss 自己敲命令**——leader 知道 `$SKILL` 和团队根，全自定位。
+> **boss 问进度/情况时**：按 `leader-protocol.md` 第五节——原生 Task 列表 + git 现场印证，汇总成人话。
 
 ## 核心铁律（已焊死）
 - **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离。
@@ -91,4 +86,4 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 - `references/contract-protocol.md` —— 跨项目并行的契约先行 + 版本广播（单项目用不到）。
 - `scripts/team-roles.json` —— 自带 19 角色目录（复刻、零依赖），make-agents 的生成源；降级路径时 leader 直接读它。
 - `scripts/make-agents.mjs` —— 把 19 角色生成为带机制约束的 agent 定义（model / 工具边界 / 红线 / 回执烤死），落 `<团队根>/.claude/agents/tvs-*.md`，幂等。
-- `scripts/panel.mjs` —— 零依赖终端 TUI 面板：`node scripts/panel.mjs [--root <团队根>]`，屏序 **进行中/任务/项目/守则/契约**（无 active.md 时无「任务」屏）。「项目」屏为每个项目列出所有工作目录（主目录 + worktree）及各自分支，并对每条环境分支（测试/预发布/生产）算出 ahead（未提交到该环境）/behind（该环境领先多少）；未配置的环境分支展示"欠缺"。
+- `scripts/status.mjs` —— 状态栏单行输出：各项目 git 状态 + 记忆欠账（🧠）+ `.tvs-boss` 白名单/体积体检。

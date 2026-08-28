@@ -45,4 +45,4 @@ git（不落盘）         谁在哪条分支干什么（快变量，现推）  
 - 角色：`agent-roles.md` + `scripts/team-roles.json` + `scripts/make-agents.mjs`（生成机制约束的角色定义）
 - 记忆：`memory-design.md`（落到 `.tvs-boss/` 三件套）
 - 跨项目：`contract-protocol.md`
-- 看板：`scripts/panel.mjs`（终端 ANSI TUI，键盘 1~5 切屏）
+- 状态栏：`scripts/status.mjs`（单行：各项目 git 状态 + 记忆欠账 + 白名单体检）

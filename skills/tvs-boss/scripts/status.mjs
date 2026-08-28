@@ -85,7 +85,7 @@ const parts = projects.map(({ id, path }) => {
 const teamWarns = [];
 try {
   const bossDir = join(teamRoot, '.tvs-boss');
-  const whitelist = new Set(['projects.md', 'rules.md', 'contracts.md', 'panel.cmd', 'panel.command', 'work']);
+  const whitelist = new Set(['projects.md', 'rules.md', 'contracts.md', 'work']);
   const strays = readdirSync(bossDir).filter(n => !whitelist.has(n));
   if (strays.length) teamWarns.push(`白名单外×${strays.length}`);
   for (const [file, maxLines] of [['rules.md', 80], ['contracts.md', 120]]) {
