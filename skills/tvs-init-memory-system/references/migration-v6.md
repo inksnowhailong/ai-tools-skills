@@ -33,3 +33,16 @@
 ### 5. 收尾
 
 `--mark-done` 刷新基线；向用户展示 git diff 供 review 后提交。
+
+## 迁移完成判据（全过才算迁完——半迁移比不迁更糟，实测两个项目卡在半途数月）
+
+逐项核对，任一不过就回上面对应步骤补完：
+
+- [ ] `墓碑.md` 存在且已列入 `记忆索引.md` 文件清单。
+- [ ] 维护员正文已是 skill 内最新版（含"维护流水线"五步——搜"维护流水线"字样即可确认）。
+- [ ] Claude Code：`.claude/settings.json` 已注册 SessionStart（`--print-index`），且命令实测有输出。
+- [ ] `记忆索引.md` 路由表无死引用——不再指向 `模块总览.md` / `数据契约.md` 等 v6 废除文件。
+- [ ] 旧 domain 树（`模块档案/`、各域五件套）已按 migration-v5 蒸馏完毕并删除，真金（决策理由 /
+      红线 / 术语入口 / 纠错记录）已落对应账本——**先蒸馏后删除，禁止直接删**。
+- [ ] `node <宿主hooks路径>/memory-precheck.mjs --lint-memory`：placeholder / missing-ledger /
+      zombie-branch / merged-branch / broken-link 全部为零（stale-review 等提示类不阻塞）。

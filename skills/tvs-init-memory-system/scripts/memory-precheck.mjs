@@ -177,6 +177,17 @@ const CONFIG = {
     lintChangelogPatterns: [
         '本次修改', '本次改动', '本次新增', '本次变更', '## 变更记录', '## 更新日志', '本轮改了',
     ],
+    // ── v6.1 lint 增项（全部代码可判定，对应维护员流水线第 2/4 步与写入闸门）──
+    /** 模板占位残留关键词；账本里出现即 lint 失败（首次维护本该删掉） */
+    lintPlaceholderPatterns: ['（示例占位）', '示例决策标题', '示例模块 · 示例决策'],
+    /** v6 必备账本清单；.memory 已部署（存在记忆索引）却缺任一文件即报 missing-ledger */
+    requiredLedgers: ['记忆索引', '业务导航', '决策日志', '红线与约定', '跨分支在研功能地图', '待确认问题', '墓碑'],
+    /** 决策日志条目数硬上限；超过说明流水账混入或取代链未收敛 */
+    lintDecisionLogMaxEntries: 30,
+    /** 欠账横幅（--print-index）：距上次维护超此天数即亮横幅 */
+    debtDaysThreshold: 7,
+    /** 欠账横幅：基线后新增 commit 数超此值即亮横幅 */
+    debtCommitsThreshold: 20,
 }
 
 const STATE_FILE = '.memory/.hook-state.json'
@@ -390,7 +401,8 @@ function buildMessage({ deltaFiles, reasons, sizeInfo }) {
         '- 如果当前环境无法启动该子 Agent，请直接说明无法执行，不要在主流程代办。',
         '- v6 账本模型：只维护五类不可推导知识——业务导航（术语↔入口）、决策日志（append-only，为什么）、红线与约定、跨分支地图、墓碑（证伪认知防复发）。',
         '- 写入黑名单：模块职责描述、业务流程叙述、数据契约、函数签名/参数、调用关系、纯路径罗列（无业务词锚定）、代码注释转述、临时进度/TODO、changelog 式"本次改了什么"——可推导内容查 codegraph 或源码，不进记忆。',
-        '- 本轮若没有新决策、新红线、导航变化（新能力/新叫法/入口迁移），直接 no-op——这是预期常态，不要硬写。',
+        '- 本轮若没有新决策、新红线、导航变化（新能力/新叫法/入口迁移），写入步直接 no-op——这是预期常态，不要硬写。',
+        '- 但维护员流水线的"清占位"和"存量复核"（地图销账 + 本次变更模块的旧条目定向复核）不随 no-op 豁免，每轮必做。',
         '- 维护后同步更新本文件（跨分支在研功能地图.md）的人读表格：功能 / 分支 / 负责人（git user.name）/ 状态 / 上次维护。',
         '',
         'mark-done 质量闸门：',
@@ -485,6 +497,12 @@ function commandStatus(stateFile) {
                 fileCount: sizes.fileCount,
                 oversized: sizes.oversized,
             },
+            lint: (() => {
+                const { hits } = collectLintHits()
+                const counts = {}
+                for (const h of hits) counts[h.kind] = (counts[h.kind] || 0) + 1
+                return { total: hits.length, counts }
+            })(),
         },
     }, null, 2))
 }
@@ -524,14 +542,14 @@ function isChangelogException(line, keyword) {
 }
 
 /**
- * 子命令：递归扫描 `.memory/` 下的 Markdown 文件中未标注历史语境的旧路径。
- *
- * 目的：阻止过期目录被继续写成"当前事实"，污染长期项目记忆。
+ * 汇集全部 lint 检查（--lint-memory 与 --print-index 欠账横幅共用）。
+ * 返回 { files, hits }；.memory 不存在时 files 为空、hits 为空。
  */
-function commandLintMemory() {
+function collectLintHits() {
     const memoryRoot = resolve('.memory')
     const files = listMarkdownFiles(memoryRoot)
     const hits = []
+    if (files.length === 0) return { files, hits }
 
     for (const file of files) {
         const text = readFileSync(file, 'utf8')
@@ -560,6 +578,67 @@ function commandLintMemory() {
                     lineContent,
                     pattern,
                 })
+            }
+            // v6.1：模板占位残留——维护员流水线第 2 步本该删掉；豁免否定/引用语境（lint 规则自述）
+            for (const pattern of CONFIG.lintPlaceholderPatterns) {
+                if (!lineContent.includes(pattern)) continue
+                if (isChangelogException(lineContent, pattern)) continue
+                hits.push({
+                    kind: 'placeholder',
+                    file: normalizePath(file),
+                    line: index + 1,
+                    lineContent,
+                    pattern,
+                })
+            }
+        })
+    }
+
+    // ── v6.1 结构检查：缺账本 / 决策日志超限 / 地图僵尸分支 ──
+    const pageNamesForLedger = new Set(files.map((f) => basename(f, '.md')))
+    if (pageNamesForLedger.has('记忆索引')) {
+        for (const ledger of CONFIG.requiredLedgers) {
+            if (!pageNamesForLedger.has(ledger)) {
+                hits.push({ kind: 'missing-ledger', file: `.memory/${ledger}.md`, line: 0, lineContent: '', pattern: 'v6 必备账本缺失' })
+            }
+        }
+    }
+    const decisionLogFile = files.find((f) => basename(f, '.md') === '决策日志')
+    if (decisionLogFile) {
+        const entryCount = (readFileSync(decisionLogFile, 'utf8').match(/^## /gm) || []).length
+        if (entryCount > CONFIG.lintDecisionLogMaxEntries) {
+            hits.push({
+                kind: 'decision-log-bloat',
+                file: normalizePath(decisionLogFile),
+                line: 0,
+                lineContent: `${entryCount} 条 > 上限 ${CONFIG.lintDecisionLogMaxEntries}`,
+                pattern: '流水账混入或取代链未收敛，按维护员准入三问精简',
+            })
+        }
+    }
+    // 地图僵尸分支：表格行的"分支"列（第 2 列）在本地与 origin 均不存在 → zombie；已并入集成线 → merged
+    const mapFile = files.find((f) => basename(f, '.md') === '跨分支在研功能地图')
+    if (mapFile && inGitRepo()) {
+        const integration = resolveIntegrationBranch()
+        const lines = readFileSync(mapFile, 'utf8').split(/\r?\n/)
+        lines.forEach((lineContent, index) => {
+            if (!lineContent.trim().startsWith('|')) return
+            const cells = lineContent.split('|').map((c) => c.trim())
+            // cells[0] 为空（行首 |），功能=cells[1]，分支=cells[2]
+            const branchName = cells[2]
+            if (!branchName || branchName === '分支' || /^-+$/.test(branchName)) return
+            if (lineContent.includes('示例占位')) return // 已由 placeholder 检查覆盖
+            const localSha = runGit(['rev-parse', '--verify', '--quiet', branchName], { silent: true })
+            const remoteSha = localSha || runGit(['rev-parse', '--verify', '--quiet', `origin/${branchName}`], { silent: true })
+            if (!remoteSha) {
+                hits.push({ kind: 'zombie-branch', file: normalizePath(mapFile), line: index + 1, lineContent, pattern: `分支 ${branchName} 本地与 origin 均不存在，销账` })
+                return
+            }
+            if (integration) {
+                try {
+                    execFileSync('git', ['merge-base', '--is-ancestor', remoteSha, integration], { stdio: 'ignore' })
+                    hits.push({ kind: 'merged-branch', file: normalizePath(mapFile), line: index + 1, lineContent, pattern: `分支 ${branchName} 已并入 ${integration}，销账` })
+                } catch { /* 未并入，正常在研 */ }
             }
         })
     }
@@ -593,6 +672,15 @@ function commandLintMemory() {
         } catch { /* ignore */ }
     }
 
+    return { files, hits }
+}
+
+/**
+ * 子命令：递归扫描 `.memory/**` 做全量 lint（旧路径 / changelog 噪音 / 占位残留 /
+ * 缺账本 / 决策日志超限 / 地图僵尸分支 / 孤儿页 / 断链 / 超龄复审）。
+ */
+function commandLintMemory() {
+    const { files, hits } = collectLintHits()
     const ok = hits.length === 0
     const counts = {}
     for (const h of hits) counts[h.kind] = (counts[h.kind] || 0) + 1
@@ -601,7 +689,7 @@ function commandLintMemory() {
         total_files: files.length,
         hits,
         message: ok
-            ? '未发现旧路径、changelog 噪音、孤儿页、断链或超龄页'
+            ? '未发现旧路径、changelog 噪音、占位残留、缺账本、决策日志超限、僵尸分支、孤儿页、断链或超龄页'
             : '发现问题：' + Object.entries(counts).map(([k, v]) => `${k}×${v}`).join('，'),
         // v5/P1 衡量回路：写而不读的记忆是负债——每次 lint 顺便自问，三问皆否就该精简而不是扩充
         review: [
@@ -614,11 +702,47 @@ function commandLintMemory() {
     process.exit(ok ? 0 : 1)
 }
 
-/** SessionStart 注入：输出记忆索引全文作为会话上下文；索引缺失时静默成功（未部署 .memory 的仓库不报错） */
+/**
+ * SessionStart 注入：欠账横幅 + 记忆索引全文。索引缺失时静默成功（未部署 .memory 的仓库不报错）。
+ *
+ * v6.1 欠账横幅：把"该维护了"从低完成率的会话尾（Stop/SessionEnd 提示常被无视）搬到
+ * 高完成率的会话头——距上次维护天数 / 基线后新增 commit / lint 违规数，超阈值即置顶提醒。
+ */
 function commandPrintIndex() {
     const indexFile = resolve(process.cwd(), '.memory', '记忆索引.md')
     if (!existsSync(indexFile)) return
-    process.stdout.write(readFileSync(indexFile, 'utf8'))
+
+    const banner = []
+    try {
+        const state = readState(resolve(STATE_FILE))
+        const meta = readMemMeta()
+        const lastMaintainedIso = meta?.updatedAt || state.lastMaintainedAt
+        const days = lastMaintainedIso ? daysSince(lastMaintainedIso) : null
+        let commitsBehind = 0
+        if (inGitRepo() && state.baselineHead) {
+            const n = Number.parseInt(runGit(['rev-list', '--count', `${state.baselineHead}..HEAD`], { silent: true }), 10)
+            commitsBehind = Number.isFinite(n) ? n : 0
+        }
+        const { hits } = collectLintHits()
+        const counts = {}
+        for (const h of hits) counts[h.kind] = (counts[h.kind] || 0) + 1
+        const overDays = days != null && days > CONFIG.debtDaysThreshold
+        const overCommits = commitsBehind >= CONFIG.debtCommitsThreshold
+        if (overDays || overCommits || hits.length > 0) {
+            const parts = []
+            if (days != null) parts.push(`距上次维护 ${days.toFixed(0)} 天`)
+            else parts.push('从未维护过')
+            if (commitsBehind > 0) parts.push(`基线后新增 ${commitsBehind} commit`)
+            if (hits.length > 0) parts.push(`lint 违规 ${hits.length} 处（${Object.entries(counts).map(([k, v]) => `${k}×${v}`).join('，')}）`)
+            banner.push(
+                `⚠️ 记忆欠账：${parts.join('；')}。`,
+                `开工前先处理：spawn \`project-memory-maintainer\` 按其五步流水线维护（清占位/写入/销账/复核），完成后 \`node ${SELF_CMD} --mark-done\`。欠账不清，下方索引指向的内容可信度存疑。`,
+                '',
+            )
+        }
+    } catch { /* 横幅失败不阻塞索引注入 */ }
+
+    process.stdout.write(banner.join('\n') + readFileSync(indexFile, 'utf8'))
 }
 
 function main() {

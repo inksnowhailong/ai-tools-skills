@@ -60,6 +60,10 @@ Claude Code 的 hook schema 与 Cursor 不同（事件名首字母大写、`hook
 > **SessionStart 索引注入（v6，仅 Claude Code）**：SessionStart hook 的 stdout 会作为
 > additionalContext 注入会话开头，把"应该读索引"从赌模型自觉变为确定性注入。
 > Cursor / Codex 无等价的上下文注入语义，维持宪法引导读取，不注册此事件。
+>
+> **v6.1 欠账横幅**：`--print-index` 在索引前置顶输出记忆欠账（距上次维护天数 / 基线后
+> 新增 commit / lint 违规数，超阈值才出现）。设计依据：挂在会话尾的维护提示完成率极低
+> （用户干完活就关窗口），搬到会话头的提醒才会被执行——阈值见脚本 CONFIG 的 debt* 项。
 
 ### Codex → `.codex/config.toml` + `.codex/hooks.json`
 
