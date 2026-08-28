@@ -130,6 +130,12 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 ---
 
+**`tvs-e2e-fast`** — 端到端测试的提速纪律
+
+> AI 做 e2e 最大的坑不是浏览器慢，而是**一步一截图的模型往返**。`tvs-e2e-fast` 强制执行阶梯：有 spec 直接跑、反复测的先写成 spec、临时验证整段代码一次执行，只有失败诊断才允许逐步操作（上限 5 步）。登录态 storageState 复用、产物统一归口 `~/.claude/e2e-artifacts/`，把"测一下这个流程"从几十轮往返压缩到一两次调用。
+
+---
+
 ### 多项目团队与状态监控
 
 **`tvs-boss`** — 一个 Chat 统管所有项目的 AI 开发团队
@@ -160,13 +166,7 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 **`tvs-team-spawn`** — 为 Cursor 项目搭建多 Agent 协作系统
 
-> 一个 Chat 干所有事效率有上限。`tvs-team-spawn` 为 Cursor 项目一次性安装 leader/sub agent 协作基础设施：邮箱通信、共享黑板、stop hook，让多个 Agent 真正能分工并行、有序交接，而不是各说各话。
-
----
-
-**`tvs-mind-seed`** — 给 Agent 一个可恢复的画像
-
-> `tvs-team-spawn` 之后，每个成员 Agent 只是个空壳。`tvs-mind-seed` 给它初始化私有记忆系统：profile、personality、active 任务、记忆索引——让 Agent 知道自己是谁、负责什么、上次干到哪，会话重开后秒速恢复状态。
+> 一个 Chat 干所有事效率有上限。`tvs-team-spawn` 为 Cursor 项目一次性安装 leader/sub agent 协作基础设施：邮箱通信、共享黑板、stop hook，让多个 Agent 真正能分工并行、有序交接，而不是各说各话。内置 mind-seed 子流程（`/tvs-team-spawn mind-seed <agent>`）给每个成员初始化可恢复的私有记忆：身份画像、硬约束、候选记忆池——会话崩溃重开后秒速恢复状态。
 
 ---
 
