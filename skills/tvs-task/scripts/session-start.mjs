@@ -53,9 +53,9 @@ if (!todoToolsEnabled()) {
 
 // ---------- 播种协议摘要 ----------
 lines.push('', [
-    '播种协议（仅当用户点名开始做某个在册任务时执行，勿开场就播）：',
-    '① 有 TaskCreate 工具时：先建父行 subject="<短名> ｜ <一句当前阶段>" + metadata {"anchor":"<任务锚>"}，立即置 in_progress 并全程保持，阶段变了改写尾巴；',
-    '② 该任务每个未完成子项建一条 subject="│ <子项标题> — <一句进展/结论>" + metadata {"anchor":"<任务锚>.<子项id>"}，动工时置 in_progress，做完置 completed；',
+    '播种协议（本 hook 不播种；只在用户显式执行 /tvs-task 时播，范围=脚本按 cwd 命中的全部任务）：',
+    '① 有 TaskCreate 工具时：跑 render.mjs --seed 拿播种计划，逐行照单 TaskCreate（subject / metadata.anchor / status 全用脚本给的，禁止自编 ID）；父行 subject="<短名> ｜ <一句当前阶段>"，in_progress 任务的父行全程保持 in_progress，阶段变了改写尾巴；',
+    '② 子行 subject="│ <子项标题> — <一句进展/结论>"，动工时置 in_progress，做完置 completed；',
     '③ subject 上限 90 字符、写自足可读的整句（对象+动作+进展），细节进 description；会话新长出的属于该任务的步骤同样 "│ "+锚；临时杂务不带锚；subject 里绝不出现锚/ID；',
     '④ 更新纪律：每做完一个动作当轮就 TaskUpdate 对应子行（转状态或刷尾巴），不许攒到最后——自检时机：子项刚做完 / 准备回复用户前 / 切下一个子项前。忘标的 SessionEnd 救不回来，账本进度会延后；',
     '⑤ 会话结束 hook 自动按锚回收（无分支子项完成状态 + 迭代记录），无需手动写账本；',

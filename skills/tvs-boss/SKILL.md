@@ -60,6 +60,9 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 - 团队根**就是某项目根**（单项目团队）时，这块写进该项目 `CLAUDE.md`；团队根是父目录（多项目）时写进父目录的 `CLAUDE.md`，队员从子项目 cwd 向上自动加载。
 - 通信纪律是静态固定文案，每次照写即可；队员必守守则随 `rules.md` 变化同步。
 
+### 4.6 播种任务账本（建团 / 恢复 都做）
+环境装了 tvs-task skill → 用 Skill 工具**执行一次 `tvs-task`（无参）**，它会按团队根 cwd 命中在册任务并全部播种进内置 Task。这是单向依赖：tvs-boss 只是替 boss 跑了一次 `/tvs-task`，tvs-task 不认识 tvs-boss；没装该 skill 就跳过。
+
 ### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
@@ -71,7 +74,7 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 - **git 治理**：分支/worktree 按需申请、新建必须先经 boss 同意（无例外条款，先于一切执行，含编排类自治循环）；worktree 获准后固定 `<项目根>/.worktree/<分支名>/`；功能分支 commit 跟验收走、push 跟闸口走（自动）；**合并干线 / 向干线 push 必须 boss 拍板**（细则见 `leader-protocol.md` 第二、七节）。
 - **spawn 纪律**：用生成的角色定义 `subagent_type: "tvs-<id>"`、不传 model（model/工具边界/红线/回执已烤死）；dev 绑项目，共享角色每单现起；同一需求 SendMessage 续派原队员、需求交付即弃，不维护常驻池（细则见 `agent-roles.md`、`leader-protocol.md` 第四节）。
 - **量级分流**：微任务（机械微操作）leader 直接干为主（批量时按快通道派低档角色）——"leader 不动手"的唯一明确例外；重任务先拆解成范围互斥的子任务图、按依赖分波并行，不许单 dev 串行扛全部（细则见 `leader-protocol.md` 第十一、十二节）。
-- **进度可见**：一条需求 = 一个原生 Task，随流水线阶段 `TaskUpdate`（细则见 `leader-protocol.md` 第八节）。
+- **进度可见**：一条需求 = 一个原生 Task，随流水线阶段 `TaskUpdate`（细则见 `leader-protocol.md` 第八节）；启动时跑一次 `tvs-task` 把在册任务账本播种进同一张列表（4.6 步，单向依赖）。
 - **数据有界**：记忆只存慢变量三件套；过程产物唯一落点 `.tvs-boss/work/<需求slug>/`（根目录禁散文件、截图日志不落盘）、boss 说收尾即清、启动巡检列表问删；`.tvs-boss/` 顶层白名单化（细则见 `memory-design.md`、`leader-protocol.md` 第十三节）。
 - **借力双轨**：纪律/方法类 skill 队员可自主用、leader 按复杂度点名；编排类只有 leader 有权启动且起飞前报 boss——共享角色的工具白名单已在机制上掐掉再派人的能力（细则见 `leader-protocol.md` 第三节）。
 - **上下文纪律**：队员上下文三层供给（项目级自动加载 / 团队级烤进角色定义 / 单级写进派工单），leader 不重复注入、不亲自读码；变钝就建议 boss `/clear` 重启——持久状态全在 `.tvs-boss/` + git + Task，重启无损（细则见 `leader-protocol.md` 第九、十节）。

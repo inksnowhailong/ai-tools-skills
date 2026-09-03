@@ -61,14 +61,16 @@ _下个ID：T-044_
 - 用户说"给 xxx 加个子项 yyy" → 定位任务追加行。
 - hook 注入的新分支候选被用户认领 → 挂为指定任务的新子项（绑该分支）；用户拒绝 → 把 `仓库路径<TAB>分支名` 追加进 ignore.txt。
 
-### 看任务
+### 看任务 + 播种（`/tvs-task` 无参的固定动作，三步连跑）
 ```bash
-node "{SKILL_DIR}/scripts/render.mjs"            # 全量树视图（含派生标注），原样贴进回复
-node "{SKILL_DIR}/scripts/render.mjs" --archive  # 附最近归档
+node "{SKILL_DIR}/scripts/scan.mjs" --apply      # ① git 事实落地（子项合并标记）
+node "{SKILL_DIR}/scripts/render.mjs"            # ② 全量树视图（含派生标注），原样贴进回复
+node "{SKILL_DIR}/scripts/render.mjs" --seed     # ③ 播种计划：按 cwd 命中列出父/子行 subject + 锚 + 状态，照单 TaskCreate（见播种协议）
+node "{SKILL_DIR}/scripts/render.mjs" --archive  # 附最近归档（用户问归档时）
 node "{SKILL_DIR}/scripts/open-panel.mjs"        # 弹独立终端窗口跑面板（用户说"开面板"时 AI 直接跑这个，零配置）
 ```
-面板是交互 TUI（r 刷新 / s 扫描报告 / q 退出），必须有独立 TTY——不要在会话内直接跑 panel.mjs。装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。
-渲染前先跑 `node "{SKILL_DIR}/scripts/scan.mjs" --apply` 让 git 事实落地（子项合并标记）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
+**第③步不是可选项**：`/tvs-task` 一执行就播种，播完在回复末尾加一行"已播种 N 个任务到内置 Task"。命中规则由脚本定（任务 repo 与 cwd 互为前缀；无 repo 的任务只在 cwd 不是 git 仓库时命中）——在项目里跑只播该项目的，在多 repo 父目录（如 tvs-boss 团队根）跑就全播。
+面板是交互 TUI（r 刷新 / s 扫描报告 / q 退出），必须有独立 TTY——不要在会话内直接跑 panel.mjs。装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
 
 ### 验收 / 归档（唯一的任务关闭路径）
 用户说"xxx 验收了/确认完成/归档"：任务标 `completed` + 加 `- 完成：今日` → 整块移入 archive.md 置顶。分支未全合主分支时提示一句再执行。归档超 30 天由 scan --apply 自动清理。
@@ -81,16 +83,16 @@ archive.md 按完成日期筛近一周 + 各 repo `git log --since="1 week ago" 
 
 ## 播种协议（接入内置 Task UI 的实时层）
 
-SessionStart hook 会向命中仓库的会话注入在册任务摘要与本协议摘要。**用户点名开始做某个在册任务时**（不是会话一开始）执行：
+SessionStart hook 只向命中仓库的会话注入在册任务摘要与本协议摘要，**不播种**。播种只有一个触发点：**用户显式执行 `/tvs-task`**（含 tvs-boss 启动协议里替用户跑的那一次）。播种范围 = `render.mjs --seed` 输出的全部命中任务，不挑状态、不分组同屏；用户点名"继续搞 xxx"时若该任务尚未播过，也按同样方式补播。执行：
 
-1. **父行**：TaskCreate `subject="<短名> ｜ <一句当前阶段>"`、`metadata {"anchor":"T-021"}`，立即 TaskUpdate 为 in_progress 并全程保持——父行 ID 最小 + in_progress 使它锁死列表顶端，树形不散。阶段变了就改写 subject 的尾巴（例：`架构重构 ｜ store 层已迁完，http 层进行中`）。
-2. **子行**：该任务每个未完成子项一条，`subject="│ <子项标题> — <一句进展/结论>"`、`metadata {"anchor":"T-021.3"}`；动工转 in_progress，做完转 completed。尾巴初始可空，有进展就补（例：`│ kop 改中台地址后重验 — 真机已确认商城正常`）。
+0. **锚只准来自脚本**：`render.mjs --seed` 逐行给出 subject / anchor / status，照单 TaskCreate；**禁止自己编 ID**（真实事故：AI 把 E批锚成了 T-005，而 T-005 在账本里是 G批，回收会把完成状态写到别的任务上）。本会话 Task 列表里已有同锚行的跳过。
+1. **父行**：`subject="<短名> ｜ <一句当前阶段>"`（脚本给的初始尾巴是"进行中 1/7"这类，开工后改写成人话，例：`架构重构 ｜ store 层已迁完，http 层进行中`）、`metadata {"anchor":"T-021"}`；in_progress 的任务父行全程保持 in_progress——父行 ID 最小 + in_progress 使它锁死列表顶端，树形不散；pending 的任务父行保持 pending，用户点名开工时再转。
+2. **子行**：该任务每个未完成子项一条，`subject="│ <子项标题> — <一句进展/结论>"`、`metadata {"anchor":"T-021.3"}`；状态照脚本给的，动工转 in_progress，做完转 completed。尾巴初始可空，有进展就补（例：`│ kop 改中台地址后重验 — 真机已确认商城正常`）。
 3. **会话新长出的步骤**：属于该任务 → 同样 `│ `前缀+锚；临时杂务（顺手修 lint 等）→ 不带锚，随会话蒸发。
 4. **subject 纪律**：列表横向空间充裕，subject 上限 **90 字符**，写满一句自足可读的话（业务对象+动作+当前进展，别人不看上下文也懂）；禁止缩写暗语（"批次B 五条接入"这类只有当事人懂的黑话要展开）；绝不出现锚/ID；进度条 ▰▰▱▱ 只出现在渲染视图，不进 subject；更长的细节/结论写 description。账本子项标题同标准——它会被原样播种成 subject 主干。
 4.5 **更新纪律（最容易忘、忘了账本进度就延后）**：每完成一个动作（跑通/改完/验过），**当轮**就 TaskUpdate 对应子行——状态转了就转，没转就刷 subject 尾巴；不许"攒到最后一起标"。自检时机三个：一个子项刚做完、准备回复用户前、切去做下一个子项前。SessionEnd 只回收你已经标过的，忘标的它救不回来。
-5. **列表卫生（内置浮层高度有限且不可翻页，约 6 行之外全被折叠）**：同屏原则上只保一组父行+子行；用户点名切换任务时，把旧任务组里**没动过的 pending 子行标 deleted** 再播新组（账本才是真相，删列表行零损失）；单任务子项超 5 条时只播本次要动的那几条，其余留在账本里。
-6. 用户明确要两个任务并行时才双组同屏，仍受上一条的行数纪律约束。
-7. **无 TaskCreate 工具的环境**：退化为普通文本清单跟进，其余流程不变。
+5. **列表卫生**：命中的任务全播，不为浮层折叠删行——账本子项已完成的脚本自然不播；会话里已 completed 的子行不删（回收要读）。用户说"把 xxx 从列表拿掉"才 deleted。
+6. **无 TaskCreate 工具的环境**：退化为普通文本清单跟进，其余流程不变。
 
 会话结束后 SessionEnd hook 自动回收（无需手动）：无分支子项的 completed 状态、迭代记录（当日完成条目压缩为一行）、pending 任务转 in_progress。绑分支子项的完成永远以 git 为准，会话里说完成不算。
 
