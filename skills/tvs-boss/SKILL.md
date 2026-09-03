@@ -63,7 +63,7 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 ### 5. 成为 leader
 从此这个 chat 持续扮演 leader。**现在去读 `references/leader.md`——那是你的基础设定（你是谁、职责、原则、边界）；具体怎么跑见 `references/leader-protocol.md`，角色目录见 `references/agent-roles.md`。读完再开工。**
 
-> **boss 问进度/情况时**：按 `leader-protocol.md` 第五节——原生 Task 列表 + git 现场印证，汇总成人话。
+> **回报节奏**：按 `leader-protocol.md` 第五节——中途只发 3 行进度卡（不提问）；拍板项写 `work/<slug>/待拍板.md`；收尾或 boss 问时按【全貌】四段报，待拍板项原文贴出、禁止编号缩写。
 
 ## 核心铁律（已焊死）
 - **单 leader 调度**；项目 = 各自独立目录 + 独立 git，天然隔离。
@@ -72,13 +72,13 @@ node "$SKILL/scripts/make-agents.mjs" --root "<团队根>"
 - **spawn 纪律**：用生成的角色定义 `subagent_type: "tvs-<id>"`、不传 model（model/工具边界/红线/回执已烤死）；dev 绑项目，共享角色每单现起；同一需求 SendMessage 续派原队员、需求交付即弃，不维护常驻池（细则见 `agent-roles.md`、`leader-protocol.md` 第四节）。
 - **量级分流**：微任务（机械微操作）leader 直接干为主（批量时按快通道派低档角色）——"leader 不动手"的唯一明确例外；重任务先拆解成范围互斥的子任务图、按依赖分波并行，不许单 dev 串行扛全部（细则见 `leader-protocol.md` 第十一、十二节）。
 - **进度可见**：一条需求 = 一个原生 Task，随流水线阶段 `TaskUpdate`（细则见 `leader-protocol.md` 第八节）。
-- **数据有界**：记忆只存慢变量三件套；过程产物唯一落点 `.tvs-boss/work/<需求slug>/`、需求交付即清；`.tvs-boss/` 顶层白名单化（细则见 `memory-design.md`、`leader-protocol.md` 第十三节）。
+- **数据有界**：记忆只存慢变量三件套；过程产物唯一落点 `.tvs-boss/work/<需求slug>/`（根目录禁散文件、截图日志不落盘）、boss 说收尾即清、启动巡检列表问删；`.tvs-boss/` 顶层白名单化（细则见 `memory-design.md`、`leader-protocol.md` 第十三节）。
 - **借力双轨**：纪律/方法类 skill 队员可自主用、leader 按复杂度点名；编排类只有 leader 有权启动且起飞前报 boss——共享角色的工具白名单已在机制上掐掉再派人的能力（细则见 `leader-protocol.md` 第三节）。
 - **上下文纪律**：队员上下文三层供给（项目级自动加载 / 团队级烤进角色定义 / 单级写进派工单），leader 不重复注入、不亲自读码；变钝就建议 boss `/clear` 重启——持久状态全在 `.tvs-boss/` + git + Task，重启无损（细则见 `leader-protocol.md` 第九、十节）。
 
 ## 结构
 - `references/leader.md` —— leader 基础设定（chat "变成"的那个内核）。
-- `references/leader-protocol.md` —— 运行细则：派活四查 / stage（靠 git 推） / 借力双轨 / 工人生命周期（需求内续用、需求间即弃） / leader 上下文卫生 / 重任务并行流水线 / 微任务快通道 / 产出物规范。
+- `references/leader-protocol.md` —— 运行细则：派活四查 / stage（靠 git 推） / 回报节奏（进度卡·待拍板清单·全貌） / 借力双轨 / 工人生命周期（需求内续用、需求间即弃） / leader 上下文卫生 / 重任务并行流水线 / 微任务快通道 / 产出物规范。
 - `references/agent-roles.md` —— 自带角色目录
 - `references/memory-design.md` —— 团队记忆三件套（projects / rules / contracts）的格式与"有界"铁律，含项目环境分支（测试/预发布/生产）三件套的记法。
 - `references/default-rules.md` —— 建团时预填进 `rules.md` 的默认通用守则（平台无关，不含项目细节）。
