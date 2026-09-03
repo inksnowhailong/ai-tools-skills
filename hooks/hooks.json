@@ -6,6 +6,20 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/tvs-setup/scripts/bootstrap-check.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/tvs-task/scripts/session-start.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/tvs-task/scripts/session-end.mjs\""
           }
         ]
       }
