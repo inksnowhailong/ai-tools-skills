@@ -63,6 +63,7 @@ description: 当用户输入 /tvs-auto、/tvs-auto -f，或说"该用哪个 skil
 | tvs-analyze vs tvs-architect | 用户要**看懂现状**（是什么/怎么运作）→ analyze；要**下判断**（怎么选/为什么坏/值不值得改）→ architect |
 | tvs-architect vs tvs-code-reviewer | 对象是**方案/设计/根因** → architect；对象是**具体 diff/PR/文件的缺陷** → code-reviewer |
 | tvs-code-reviewer vs tvs-clean-code | 用户要**找问题**（审、挑毛病）→ code-reviewer；要**改好它**（整理、加注释、可读性）→ clean-code |
+| tvs-deep-interview vs tvs-council | 用户**说不清要什么** → deep-interview；说得清但要**多角度商讨、不想被附和** → council |
 | tvs-deep-interview vs 直接干 | 用户自己都说不清要什么 → deep-interview；说得清只是没给细节 → 反问 1-2 句后直接干 |
 | tvs-boss vs tvs-team-spawn | 多**项目**统管、当前 chat 当 leader → boss；单项目内搭多 chat 基建（主战场 Cursor）→ team-spawn |
 | 重型编排类（autopilot/team/ultrawork 等） vs 单 skill | 需求是**多模块、多阶段、可并行**才考虑重型；单点任务命中重型一律视为反命中 |
