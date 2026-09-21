@@ -32,4 +32,4 @@ description: 当用户说"审计 skill、skill 体检、清一下 skill 里的�
 
 ## Do_Not_Use_When
 
-本 skill 审计的是 **skill 元文档自身**（SKILL.md / references 里"写给人看的解释性内容"），不是审计业务代码。如果用户想审计的是项目业务代码质量、代码坏味道、可维护性，那是 `tvs-clean-code` / `tvs-code-reviewer` 的职责，不要用本 skill。
+本 skill 审计的是 **skill 元文档自身**（SKILL.md / references 里"写给人看的解释性内容"），不是审计业务代码。如果用户想审计的是项目业务代码质量、代码坏味道、可维护性，那是内置 `/code-review`（找问题）与 `/simplify`（改好它）的职责，不要用本 skill。
