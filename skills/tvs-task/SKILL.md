@@ -67,10 +67,55 @@ node "{SKILL_DIR}/scripts/scan.mjs" --apply      # ① git 事实落地（子项
 node "{SKILL_DIR}/scripts/render.mjs"            # ② 全量树视图（含派生标注），原样贴进回复
 node "{SKILL_DIR}/scripts/render.mjs" --seed     # ③ 播种计划：按 cwd 命中列出父/子行 subject + 锚 + 状态，照单 TaskCreate（见播种协议）
 node "{SKILL_DIR}/scripts/render.mjs" --archive  # 附最近归档（用户问归档时）
-node "{SKILL_DIR}/scripts/open-panel.mjs"        # 弹独立终端窗口跑面板（用户说"开面板"时 AI 直接跑这个，零配置）
+node "{SKILL_DIR}/scripts/open-panel.mjs"        # 旧 TUI 面板（离线兜底）；默认面板见下面「面板（Artifact）」
 ```
 **第③步不是可选项**：`/tvs-task` 一执行就播种，播完在回复末尾加一行"已播种 N 个任务到内置 Task"。命中规则由脚本定（任务 repo 与 cwd 互为前缀；无 repo 的任务只在 cwd 不是 git 仓库时命中）——在项目里跑只播该项目的，在多 repo 父目录（如 tvs-boss 团队根）跑就全播。
-面板是交互 TUI（r 刷新 / s 扫描报告 / q 退出），必须有独立 TTY——不要在会话内直接跑 panel.mjs。装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
+`open-panel.mjs` 是旧的交互 TUI（r 刷新 / s 扫描报告 / q 退出），必须有独立 TTY——不要在会话内直接跑 panel.mjs。装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
+
+## 面板（Artifact）
+
+跨会话、跨设备的常驻面板：页面订阅共享数据库，**写一次库，所有打开着的面板立刻跟着变**。
+
+**一个范围一块板，不共用。** 范围由 cwd 决定，命中规则与播种（`render.mjs --seed`）逐字一致：
+
+```
+在项目目录跑      -> 该项目的指挥台，只有命中该项目的任务
+在多 repo 父目录跑 -> 总指挥台，全部任务（tvs-boss 团队根就是这种）
+```
+
+分板是**物理隔离**：各板各有一个 db，不同实例之间删不着对方、watch 也不串、看不见彼此的噪音。地址簿 `~/.tvs-panel.json` 按范围键索引（中立位置，tvs-boss 的需求区按团队根取同一块板）。
+
+```bash
+node "{SKILL_DIR}/scripts/panel-data.mjs"                       # 按当前目录定范围
+node "{SKILL_DIR}/scripts/panel-data.mjs" --cwd <路径>           # 指定范围
+node "{SKILL_DIR}/scripts/panel-data.mjs" --no-git              # 跳过 git 派生（快速路径）
+node "{SKILL_DIR}/scripts/panel-data.mjs" --known T-1,T-2       # 告知该板现存 id，拿应删差集
+# 页面发布、地址簿、逐块重发 —— 全部走 tvs-panel，这里只产数据
+```
+
+### 同步（用户说"开面板 / 看板子 / 同步面板"时）
+
+1. 跑 `panel-data.mjs`（默认按当前目录定范围），把 `docs` 逐个落盘成 JSON 文件，拿到 `scope` 与 `url`。
+2. **`url` 为空** → 这个范围还没有板：交给 `tvs-panel` 发布页面并记地址（本 skill 不持有页面）。
+   **`url` 非空** → **不要重发页面**，直接进第 3 步。
+3. `ArtifactData` 的 `list` 读该板 `tasks` 集合现有 id，回带 `--known` 重跑脚本拿 `stale`。
+4. `ArtifactData` 的 `batch` 一次写完：每个文档一条 `set`（`collection:"tasks"`、`doc_id` 取文档的 `id` 字段、用 `file_path` 指向落盘的 JSON），`stale` 里每个 id 一条 `delete`。
+   **已存在的文档必须带 `if_version`**（值取第 3 步 `list` 返回的 version），否则整批被乐观锁拒绝、**一个字都不写**。被拒了就重新 `list` 拿新 version 再发一次。
+5. 回复里只给地址，**不复述面板内容**——面板本身就是给人看的。
+
+**`taskCount` 远小于 `totalTasks` 是正常的**，说明这个范围过滤掉了别的项目。命中 0 个就说一句"当前目录不属于任何在册任务的项目"，不要退回去同步全量——那等于把别的项目的噪音塞进这块板。
+
+**归档任务必须删**：库里留着它，面板展示的就是过期真相。
+
+### 纪律
+
+面板的价值等于同步的及时性，**过期的面板比没有面板更糟**。同步时机与播种的更新纪律同级：账本一变（建任务 / 挂子项 / `scan --apply` 落地 / 验收归档）就顺手重跑一次同步，不许攒到最后。
+
+每条文档自带 `syncedAt`，页面按**区内最旧的那条**报"N 分钟前同步"，超 30 分钟转警示色——看到它发黄就是漏同步了。时间戳落在每条文档上而不是一个全局字段，是因为同一块板上任务区与需求区由不同流程写入，全局字段会被互相覆盖成假新鲜度。
+
+### 页面归谁
+
+页面与地址簿由 `tvs-panel` 持有，本 skill **只产 `tasks` 集合的数据**。改页面、发布、逐块重发都在那边；这里的字段契约与页面对应，改字段要两边一起改。
 
 ### 验收 / 归档（唯一的任务关闭路径）
 用户说"xxx 验收了/确认完成/归档"：任务标 `completed` + 加 `- 完成：今日` → 整块移入 archive.md 置顶。分支未全合主分支时提示一句再执行。归档超 30 天由 scan --apply 自动清理。
