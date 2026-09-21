@@ -61,8 +61,8 @@ description: 当用户输入 /tvs-auto、/tvs-auto -f，或说"该用哪个 skil
 | 易混对 | 判别键 |
 |---|---|
 | tvs-analyze vs tvs-architect | 用户要**看懂现状**（是什么/怎么运作）→ analyze；要**下判断**（怎么选/为什么坏/值不值得改）→ architect |
-| tvs-architect vs tvs-code-reviewer | 对象是**方案/设计/根因** → architect；对象是**具体 diff/PR/文件的缺陷** → code-reviewer |
-| tvs-code-reviewer vs tvs-clean-code | 用户要**找问题**（审、挑毛病）→ code-reviewer；要**改好它**（整理、加注释、可读性）→ clean-code |
+| 代码审查类需求 | tvs-code-reviewer / tvs-clean-code / tvs-pullread **均已废弃**，不再路由到它们。审查用内置 `/code-review`，清理用内置 `/simplify`；对象是**方案/设计/根因**时才走 tvs-architect |
+
 | tvs-deep-interview vs tvs-council | 用户**说不清要什么** → deep-interview；说得清但要**多角度商讨、不想被附和** → council |
 | tvs-deep-interview vs 直接干 | 用户自己都说不清要什么 → deep-interview；说得清只是没给细节 → 反问 1-2 句后直接干 |
 | tvs-boss vs tvs-team-spawn | 多**项目**统管、当前 chat 当 leader → boss；单项目内搭多 chat 基建（主战场 Cursor）→ team-spawn |
@@ -88,7 +88,8 @@ description: 当用户输入 /tvs-auto、/tvs-auto -f，或说"该用哪个 skil
 
 ## 第五步：执行
 
-- 有 Skill 调用机制的环境：直接 invoke 选中的 skill，把用户需求原文作为参数传入；调用时用**环境实际注册名**（可能含插件前缀，如 `tvs-inksnow:tvs-pullread`），别用清单里的简称硬调。
+- 有 Skill 调用机制的环境：直接 invoke 选中的 skill，把用户需求原文作为参数传入；调用时用**环境实际注册名**（可能含插件前缀，如 `tvs-inksnow:tvs-task`），别用清单里的简称硬调。
+- **不要路由到标了「已废弃」的 skill**（描述以 `【已废弃】` 开头、或正文首段有废弃横幅）。它们已关闭模型自动调用，只能由用户手动唤起；遇到其场景时按废弃横幅里写的替代路径走。
 - **路由确认即方案确认**：用户选中后直接开工，不再补一轮"方案概述 + 等确认"。
 - 没有 Skill 机制的环境：读该 skill 的 SKILL.md，按其行为契约直接照做。
 - **链式执行**：整条链只在第四步确认一次；段间自动衔接（上一段的产物路径/结论作为下一段输入），不再插入"进入下一段？"式确认；链中各 skill 自带的交互（如访谈提问）照常发生。

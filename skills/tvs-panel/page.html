@@ -1,0 +1,1205 @@
+<title>tvs 指挥台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* ── 令牌：色感沿用 panel.mjs 的 ANSI 配色（110 蓝 / 180 琥珀 / 150 绿 / 243 灰）── */
+  :root {
+    --bg: #F1F3F5;
+    --surface: #FFFFFF;
+    --sunk: #E9ECEF;
+    --ink: #1A1F26;
+    --muted: #6B7280;
+    --line: #DEE2E6;
+    --accent: #3A6EA5;
+    --run: #9A6A1C;
+    --run-soft: #F6EDDD;
+    --done: #4A7A28;
+    --done-soft: #E9F2E0;
+    --accept: #1F7A4D;
+    --accept-soft: #DFF3E9;
+    --stall: #5C7A8A;
+    --stall-soft: #E6EDF1;
+    /* 图表色（与 UI 色分开选步，已过 dataviz 六项校验：相邻 CVD ΔE 18.6 / 常视 19.5） */
+    --c-closed: #4A7A28;
+    --c-pending: #3A6EA5;
+    --c-verify: #9A6A1C;
+    --radius: 9px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171C;
+      --surface: #1C2027;
+      --sunk: #171B21;
+      --ink: #DDE1E6;
+      --muted: #8A93A0;
+      --line: #2B313A;
+      --accent: #87AFD7;
+      --run: #D7AF87;
+      --run-soft: #2B2317;
+      --done: #AFD787;
+      --done-soft: #212B18;
+      --accept: #6FCF97;
+      --accept-soft: #16301F;
+      --stall: #7D96A6;
+      --stall-soft: #1B242A;
+      /* 深色不是浅色翻转，是对深底重新选步（ΔE 16.9 / 18.7，全项通过） */
+      --c-closed: #2FA36F;
+      --c-pending: #4A90D9;
+      --c-verify: #C98500;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171C;
+    --surface: #1C2027;
+    --sunk: #171B21;
+    --ink: #DDE1E6;
+    --muted: #8A93A0;
+    --line: #2B313A;
+    --accent: #87AFD7;
+    --run: #D7AF87;
+    --run-soft: #2B2317;
+    --done: #AFD787;
+    --done-soft: #212B18;
+    --accept: #6FCF97;
+    --accept-soft: #16301F;
+    --stall: #7D96A6;
+    --stall-soft: #1B242A;
+    --c-closed: #2FA36F;
+    --c-pending: #4A90D9;
+    --c-verify: #C98500;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+                 "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding-inline: 18px;
+    padding-block: 0 56px;
+  }
+
+  /* ── 顶栏：常驻，滚动时统计与筛选不跟着跑掉 ── */
+  header {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 5;
+    background: var(--bg);
+    padding-block: 18px 12px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 20px;
+  }
+  .title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .fresh { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .fresh.aged { color: var(--run); font-weight: 500; }
+  /* 契约漂移：脚本改了字段名，页面本来会静默少渲染一行，这个让它看得见 */
+  .drift { font-size: 11.5px; color: var(--run); font-weight: 500; }
+
+  .overview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 9px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .overview b {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .overview .hot b { color: var(--accept); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+  .chip {
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 11px;
+    border-radius: 99px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── 分区 ── */
+  section { margin-bottom: 26px; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 11px;
+  }
+  h2 {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0;
+  }
+  .list { display: grid; gap: 13px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 15px 16px;
+  }
+  /* 需要 boss 动手的状态整张提亮——这类卡必须一眼撞见 */
+  .card.accept { border-color: var(--accept); box-shadow: inset 3px 0 0 var(--accept); }
+  .card.stall { border-color: var(--stall); }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .name { font-size: 16px; font-weight: 600; }
+  .full { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { font-size: 11px; font-weight: 500; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+  .badge.b-run { background: var(--run-soft); color: var(--run); }
+  .badge.b-pend { background: var(--sunk); color: var(--muted); }
+  .badge.b-accept { background: var(--accept-soft); color: var(--accept); }
+  .badge.b-stall { background: var(--stall-soft); color: var(--stall); }
+
+  .metaline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 7px 0 4px;
+  }
+  .metaline .count { color: var(--ink); font-weight: 500; }
+  .note { font-size: 13px; margin-top: 7px; }
+
+  /* ── 流水线阶段条：一眼看出卡在哪一棒 ── */
+  .stages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 3px;
+    margin: 10px 0 2px;
+    font-size: 11.5px;
+  }
+  .st { color: var(--muted); padding: 1px 2px; }
+  .st.passed { color: var(--done); }
+  .st.now {
+    color: var(--run);
+    font-weight: 600;
+    background: var(--run-soft);
+    padding: 1px 8px;
+    border-radius: 99px;
+  }
+  .st + .st::before { content: "›"; color: var(--line); margin-right: 4px; }
+  .st.now + .st::before, .st + .st.now::before { color: var(--muted); }
+
+  /* ── 待拍板：面板上最要紧的东西 ── */
+  .pend-head {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin: 13px 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accept);
+  }
+  .decisions { display: grid; gap: 9px; }
+  /* 三级：重点（提亮）> 普通卡点（底色）> 已解（退到描边） */
+  .decision {
+    background: var(--sunk);
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 11px 13px;
+  }
+  .decision.focus { background: var(--accept-soft); }
+  .decision.handled {
+    background: transparent;
+    border-color: var(--line);
+    border-style: dashed;
+    color: var(--muted);
+  }
+  .decision.handled .d-title { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .d-title {
+    font-weight: 600;
+    font-size: 13.5px;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .d-no { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .d-body {
+    font-size: 12.5px;
+    margin-top: 5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* ── 议会：本页唯一放视觉重量的地方，收敛走势是这块面板的核心信号 ── */
+  .council-card { background: var(--surface); }
+  .council-card .name { font-size: 17px; }
+
+  .chart-box {
+    margin: 12px 0 2px;
+    padding: 12px 12px 6px;
+    background: var(--sunk);
+    border-radius: 8px;
+  }
+  .chart-title {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .chart-box svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .verdict { font-size: 12px; margin-top: 2px; }
+  .verdict.up { color: var(--c-verify); font-weight: 500; }   /* 未决还在涨 = 在发散 */
+  .verdict.down { color: var(--c-closed); font-weight: 500; }
+  .verdict.flat { color: var(--muted); }
+
+  /* 状态构成：结掉的 / 待裁决 / 待验证。2px 缝隙是相邻色块的分隔编码 */
+  .stack { display: flex; gap: 2px; height: 10px; margin: 12px 0 7px; }
+  .stack span { min-width: 3px; }
+  .stack span:first-child { border-radius: 4px 0 0 4px; }
+  .stack span:last-child { border-radius: 0 4px 4px 0; }
+  .stack span:only-child { border-radius: 4px; }
+  .stack-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; font-size: 11.5px; color: var(--muted); }
+  .stack-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .stack-legend i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+  .stack-legend b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  /* 项目入口：boss 总板 → 各项目自己的 task 板，一步可达 */
+  .links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .plink {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 7px;
+    font: inherit;
+    font-size: 13px;
+    text-decoration: none;
+    padding: 7px 13px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .plink:hover { border-color: var(--accent); }
+  .plink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .plink .n {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--accept);
+    font-weight: 500;
+  }
+  /* 没建板的不是死链，是灰的、不可点、明说要去哪儿建 */
+  .plink.none { color: var(--muted); border-style: dashed; cursor: default; }
+  .plink.none:hover { border-color: var(--line); }
+
+  .vbadge {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: var(--sunk);
+    color: var(--muted);
+  }
+
+  .owner-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 7px; }
+  .owner-list li { font-size: 13px; }
+  .owner-list .q { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  /* ── 子项（任务区）── */
+  .cells { display: flex; flex-wrap: wrap; gap: 3px; margin: 11px 0 7px; }
+  .cell { width: 15px; height: 7px; border-radius: 2px; background: var(--sunk); }
+  .cell.completed { background: var(--done); }
+  .cell.in_progress { background: var(--run); }
+  .bar { height: 7px; border-radius: 3px; background: var(--sunk); overflow: hidden; max-width: 320px; }
+  .bar span { display: block; height: 100%; background: var(--done); }
+
+  .subs { list-style: none; margin: 9px 0 0; padding: 0; display: grid; gap: 7px; }
+  .sub { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; }
+  .mark { flex: 0 0 auto; width: 13px; text-align: center; line-height: 1.55; }
+  .mark.pending { color: var(--muted); }
+  .mark.in_progress { color: var(--run); }
+  .mark.completed { color: var(--done); }
+  .sub-body { flex: 1 1 auto; min-width: 0; }
+  .sub.completed .sub-body { color: var(--muted); }
+  .branch {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--sunk);
+    padding: 0 6px;
+    border-radius: 4px;
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+  }
+
+  details { margin-top: 10px; }
+  summary {
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 0;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; font-size: 10px; }
+  details[open] summary::before { content: "▾"; }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .iters, .artifacts {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 4px; }
+  .iters ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+  .artifacts .files { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+  .artifacts .files span { overflow-wrap: anywhere; }
+
+  .notice {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 24px;
+    color: var(--muted);
+    text-align: center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="title-row">
+      <h1>tvs 指挥台</h1>
+    </div>
+    <div id="overview" class="overview" hidden></div>
+    <div id="filters" class="filters" hidden></div>
+  </header>
+
+  <section id="link-sec" hidden>
+    <div class="sec-head"><h2>项目</h2></div>
+    <div id="links" class="links"></div>
+  </section>
+
+  <section id="crew-sec" hidden>
+    <div class="sec-head">
+      <h2>在途需求</h2>
+      <span id="crew-fresh" class="fresh"></span>
+    </div>
+    <div id="crew" class="list"></div>
+  </section>
+
+  <section id="council-sec" hidden>
+    <div class="sec-head">
+      <h2>议会</h2>
+      <span id="council-fresh" class="fresh"></span>
+    </div>
+    <div id="council" class="list"></div>
+  </section>
+
+  <section id="task-sec" hidden>
+    <div class="sec-head">
+      <h2>在册任务</h2>
+      <span id="task-fresh" class="fresh"></span>
+    </div>
+    <div id="tasks" class="list"></div>
+  </section>
+
+  <div id="notice" class="notice">正在读取…</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var el = {
+    linkSec: document.getElementById("link-sec"),
+    links: document.getElementById("links"),
+    crewFresh: document.getElementById("crew-fresh"),
+    councilFresh: document.getElementById("council-fresh"),
+    councilSec: document.getElementById("council-sec"),
+    council: document.getElementById("council"),
+    taskFresh: document.getElementById("task-fresh"),
+    overview: document.getElementById("overview"),
+    filters: document.getElementById("filters"),
+    crewSec: document.getElementById("crew-sec"),
+    crew: document.getElementById("crew"),
+    taskSec: document.getElementById("task-sec"),
+    tasks: document.getElementById("tasks"),
+    notice: document.getElementById("notice")
+  };
+
+  /**
+   * 字段契约：页面指望每个集合有这些字段。某个字段在该集合**所有**文档里都不存在，
+   * 就不是脏数据而是脚本改了字段名——页面会静默少渲染一整块，看不出任何异常。
+   * 这里把它显式报出来，区标题旁挂一行警告。
+   */
+  var CONTRACT = {
+    tasks: ["shortName", "status", "subs", "progress"],
+    crew: ["title", "pending", "openCount"],
+    council: ["topic", "round", "issues"],
+    links: ["project", "url"]
+  };
+  var drift = { tasks: [], crew: [], council: [], links: [] };
+
+  function checkContract(name, raws) {
+    var keys = CONTRACT[name] || [];
+    drift[name] = !raws.length ? [] : keys.filter(function (k) {
+      return raws.every(function (r) { return !r || !(k in r); });
+    });
+  }
+
+  function driftNote(name) {
+    var miss = drift[name] || [];
+    return miss.length ? "⚠ 数据缺字段：" + miss.join(" / ") + "（脚本与页面契约不一致）" : "";
+  }
+
+  var MARK = { pending: "□", in_progress: "■", completed: "✔" };
+  var STATE_LABEL = { pending: "待开始", in_progress: "进行中", completed: "已完成" };
+  var STAGES = ["派活", "编码", "审查", "测试", "待提交", "完成"];
+
+  var tasks = [], crew = [], council = [], links = [];
+  var filter = "";            // 空串 = 全部
+  var loaded = { tasks: false, crew: false, council: false, links: false };
+
+  function h(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function str(v) { return v == null ? "" : String(v); }
+
+  // ── 归一化：缺字段一律给安全默认，绝不因为一个脏文档整页白 ──
+
+  function normTask(id, raw) {
+    var d = raw || {};
+    var subs = Array.isArray(d.subs) ? d.subs.filter(function (s) { return s && typeof s === "object"; }) : [];
+    return {
+      kind: "task",
+      id: str(d.id || id),
+      title: str(d.title || id),
+      shortName: str(d.shortName || d.title || id),
+      status: ["pending", "in_progress", "completed"].indexOf(d.status) > -1 ? d.status : "in_progress",
+      repos: Array.isArray(d.repos) ? d.repos.map(str) : [],
+      subs: subs,
+      progress: (d.progress && typeof d.progress === "object") ? d.progress : { done: 0, total: subs.length },
+      accept: !!d.accept,
+      stalled: !!d.stalled,
+      lastActivity: str(d.lastActivity),
+      iters: Array.isArray(d.iters) ? d.iters.map(str) : [],
+      syncedAt: str(d.syncedAt),
+      order: typeof d.order === "number" ? d.order : 0
+    };
+  }
+
+  function normDemand(id, raw) {
+    var d = raw || {};
+    var pending = Array.isArray(d.pending) ? d.pending.filter(function (p) { return p && typeof p === "object"; }) : [];
+    return {
+      kind: "demand",
+      slug: str(d.slug || id),
+      title: str(d.title || d.slug || id),
+      project: str(d.project),
+      branch: str(d.branch),
+      stage: str(d.stage),
+      note: str(d.note),
+      pending: pending,
+      openCount: typeof d.openCount === "number"
+        ? d.openCount
+        : pending.filter(function (p) { return !p.done; }).length,
+      focusCount: typeof d.focusCount === "number"
+        ? d.focusCount
+        : pending.filter(function (p) { return p.focus && !p.done; }).length,
+      artifacts: Array.isArray(d.artifacts) ? d.artifacts.map(str) : [],
+      root: str(d.root),
+      syncedAt: str(d.syncedAt),
+      order: typeof d.order === "number" ? d.order : 0
+    };
+  }
+
+  /** 排序权重：越需要 boss 动手越靠前 */
+  function taskWeight(t) {
+    if (t.accept) return 3;
+    if (t.status === "in_progress") return 2;
+    if (t.status === "pending") return 1;
+    return 0;
+  }
+  function crewWeight(d) {
+    if (d.focusCount) return 5;
+    if (d.openCount) return 4;
+    if (d.stage === "待提交") return 3;   // 也是在等 boss 点头（合不合主线）
+    if (d.stage === "完成") return 1;
+    return 2;
+  }
+  function councilWeight(d) {
+    if (d.closed) return 1;
+    if (d.forOwner.length) return 4;   // 等发起人裁决
+    return 3;                          // 在议
+  }
+
+  /**
+   * 数据新鲜度——面板最大的风险是显示过期真相，所以每个区都把自己的同步时间挂在标题边上。
+   * 时间戳取该区**最旧**的一条：多个 Claude 实例各写各的文档，
+   * 只报最新的那次会把别人那半边的过期数据也说成是新的。
+   */
+  function oldestSync(list) {
+    var oldest = null;
+    list.forEach(function (d) {
+      if (!d.syncedAt) return;
+      var t = new Date(d.syncedAt).getTime();
+      if (!isFinite(t)) return;
+      if (oldest === null || t < oldest) oldest = t;
+    });
+    return oldest;
+  }
+
+  function freshText(ts) {
+    var mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return "刚刚同步";
+    if (mins < 60) return mins + " 分钟前同步";
+    if (mins < 1440) return Math.floor(mins / 60) + " 小时前同步";
+    return Math.floor(mins / 1440) + " 天前同步";
+  }
+
+  function drawFresh() {
+    [[el.crewFresh, crew, "crew"], [el.councilFresh, council, "council"], [el.taskFresh, tasks, "tasks"]]
+      .forEach(function (pair) {
+        var node = pair[0];
+        if (!node) return;
+        // 契约漂移比新鲜度更要紧：数据本身对不上时，说新鲜度没有意义
+        var d = driftNote(pair[2]);
+        if (d) { node.textContent = d; node.className = "drift"; return; }
+        var ts = oldestSync(pair[1]);
+        if (ts === null) { node.textContent = ""; node.className = "fresh"; return; }
+        node.textContent = freshText(ts);
+        node.className = "fresh" + ((Date.now() - ts) / 60000 >= 30 ? " aged" : "");
+      });
+  }
+
+  function drawOverview(ds, ts, cs) {
+    var decisions = 0, focus = 0, accept = 0, run = 0, stall = 0;
+    var councilOpen = 0, councilRulings = 0;
+    ds.forEach(function (d) {
+      decisions += d.openCount;
+      focus += d.focusCount;
+    });
+    (cs || []).forEach(function (d) {
+      if (!d.closed) councilOpen++;
+      if (!d.closed) councilRulings += d.forOwner.length;
+    });
+    ts.forEach(function (t) {
+      if (t.accept) accept++;
+      else if (t.stalled) stall++;
+      if (t.status === "in_progress") run++;
+    });
+
+    var parts = [];
+    if (ds.length) parts.push({ k: "在途需求", v: ds.length });
+    if (decisions) parts.push({ k: "等你拍板", v: decisions, cls: "hot" });
+    if (focus) parts.push({ k: "其中重点", v: focus, cls: "hot" });
+    if (councilOpen) parts.push({ k: "在议", v: councilOpen });
+    if (councilRulings) parts.push({ k: "等你裁决", v: councilRulings, cls: "hot" });
+    if (ts.length) parts.push({ k: "在册任务", v: ts.length });
+    if (run) parts.push({ k: "进行中", v: run });
+    if (accept) parts.push({ k: "等你验收", v: accept, cls: "hot" });
+    if (stall) parts.push({ k: "停滞", v: stall });
+
+    el.overview.innerHTML = "";
+    parts.forEach(function (p) {
+      var s = h("span", p.cls || "");
+      s.appendChild(document.createTextNode(p.k + " "));
+      s.appendChild(h("b", null, String(p.v)));
+      el.overview.appendChild(s);
+    });
+    el.overview.hidden = parts.length === 0;
+  }
+
+  function drawFilters() {
+    var names = [];
+    var add = function (n) { if (n && names.indexOf(n) === -1) names.push(n); };
+    tasks.forEach(function (t) { t.repos.forEach(add); });
+    crew.forEach(function (d) { add(d.project); });
+    if (names.length < 2) { el.filters.hidden = true; return; }
+
+    el.filters.innerHTML = "";
+    [{ k: "", label: "全部" }].concat(names.map(function (n) { return { k: n, label: n }; }))
+      .forEach(function (opt) {
+        var b = h("button", "chip", opt.label);
+        b.type = "button";
+        b.setAttribute("aria-pressed", filter === opt.k ? "true" : "false");
+        b.addEventListener("click", function () { filter = opt.k; draw(); });
+        el.filters.appendChild(b);
+      });
+    el.filters.hidden = false;
+  }
+
+  // ── 需求卡 ──
+
+  function stageBar(stage) {
+    var box = h("div", "stages");
+    var at = STAGES.indexOf(stage);
+    if (at === -1) {
+      // leader 写了表外的阶段词：原样显示一个，不硬塞进流水线
+      box.appendChild(h("span", "st now", stage));
+      return box;
+    }
+    STAGES.forEach(function (s, i) {
+      box.appendChild(h("span", "st " + (i < at ? "passed" : (i === at ? "now" : "")), s));
+    });
+    return box;
+  }
+
+  function decisionCard(p) {
+    var box = h("div", "decision" + (p.done ? " handled" : (p.focus ? " focus" : "")));
+
+    var t = h("div", "d-title");
+    // 编号是台账里的锚，boss 对着它跟 leader 说「第 9 条怎么办」；跳号本身也是信息（已拍板删除）
+    if (p.no) t.appendChild(h("span", "d-no mono", "#" + p.no));
+    t.appendChild(h("span", null, str(p.title)));
+    if (p.done) t.appendChild(h("span", "badge b-pend", "已处理"));
+    box.appendChild(t);
+
+    if (p.body) box.appendChild(h("div", "d-body", str(p.body)));
+    return box;
+  }
+
+  function demandCard(d) {
+    var c = h("div", "card" + (d.openCount ? " accept" : ""));
+
+    var head = h("div", "head");
+    var left = h("div");
+    left.appendChild(h("div", "name", d.title));
+    if (d.slug && d.slug !== d.title) left.appendChild(h("div", "full mono", d.slug));
+    head.appendChild(left);
+
+    var badges = h("div", "badges");
+    if (d.openCount) badges.appendChild(h("span", "badge b-accept", "待拍板 " + d.openCount));
+    if (d.stage) badges.appendChild(h("span", "badge b-run", d.stage));
+    head.appendChild(badges);
+    c.appendChild(head);
+
+    if (d.stage) c.appendChild(stageBar(d.stage));
+
+    if (d.project || d.branch) {
+      var line = h("div", "metaline");
+      if (d.project) line.appendChild(h("span", null, d.project));
+      if (d.branch) line.appendChild(h("span", "mono", d.branch));
+      c.appendChild(line);
+    }
+    if (d.note) c.appendChild(h("div", "note", d.note));
+
+    // 卡点会积到十几二十条，全摊开就没法看。分三组：
+    // leader 自己加粗标重点的摊开，其余折叠，已解的再折一层。
+    var focus = d.pending.filter(function (p) { return p.focus && !p.done; });
+    var later = d.pending.filter(function (p) { return !p.focus && !p.done; });
+    var handled = d.pending.filter(function (p) { return p.done; });
+
+    if (d.openCount) {
+      var ph = h("div", "pend-head");
+      ph.appendChild(h("span", null, "等你拍板 " + d.openCount + " 条"
+                                     + (focus.length ? "，其中 " + focus.length + " 条标了重点" : "")));
+      c.appendChild(ph);
+    }
+
+    function group(items) {
+      var box = h("div", "decisions");
+      items.forEach(function (p) { box.appendChild(decisionCard(p)); });
+      return box;
+    }
+    function folded(label, items) {
+      var det = document.createElement("details");
+      det.appendChild(h("summary", null, label));
+      det.appendChild(group(items));
+      return det;
+    }
+
+    if (focus.length) c.appendChild(group(focus));
+    if (later.length) c.appendChild(folded("其余卡点 " + later.length + " 条", later));
+    if (handled.length) c.appendChild(folded("已解 " + handled.length + " 条", handled));
+
+    if (d.artifacts.length) {
+      var af = h("div", "artifacts");
+      af.appendChild(h("div", "lbl", "产出"));
+      var files = h("div", "files");
+      d.artifacts.forEach(function (f) { files.appendChild(h("span", "mono", f)); });
+      af.appendChild(files);
+      c.appendChild(af);
+    }
+    return c;
+  }
+
+  /** 项目入口：通往各项目自己那块 task 板。未建板的渲染成灰的，不给死链 */
+  function linkRow(l) {
+    var has = !!l.url;
+    var node = document.createElement(has ? "a" : "span");
+    node.className = "plink" + (has ? "" : " none");
+    if (has) { node.href = l.url; node.target = "_blank"; node.rel = "noopener"; }
+    else node.title = "在该项目目录下跑一次 tvs-task 即可建板";
+
+    node.appendChild(h("span", null, str(l.project)));
+    if (has && typeof l.openTasks === "number" && l.openTasks > 0) {
+      node.appendChild(h("span", "n", l.openTasks + " 未完"));
+    } else if (!has) {
+      node.appendChild(h("span", "n", "未建板"));
+    }
+    return node;
+  }
+
+  // ── 议会卡 ──
+
+  function normCouncil(id, raw) {
+    var d = raw || {};
+    var issues = Array.isArray(d.issues) ? d.issues.filter(function (x) { return x && typeof x === "object"; }) : [];
+    return {
+      kind: "council",
+      dir: str(d.dir || id),
+      date: str(d.date),
+      topic: str(d.topic || d.dir || id),
+      legacy: !!d.legacy,
+      closed: !!d.closed,
+      round: typeof d.round === "number" ? d.round : 0,
+      draftVersion: typeof d.draftVersion === "number" ? d.draftVersion : 0,
+      phase: str(d.phase),
+      issues: issues,
+      issueCount: typeof d.issueCount === "number" ? d.issueCount : issues.length,
+      statusKnown: d.statusKnown !== false,
+      // null = 状态解析不出来，和 0 是两回事：0 是真收敛了，null 是不知道
+      openCount: typeof d.openCount === "number" ? d.openCount : null,
+      trend: Array.isArray(d.trend) ? d.trend : [],
+      forOwner: Array.isArray(d.forOwner) ? d.forOwner.filter(function (x) { return x && typeof x === "object"; }) : [],
+      syncedAt: str(d.syncedAt),
+      order: typeof d.order === "number" ? d.order : 0
+    };
+  }
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs) {
+    var n = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  /**
+   * 收敛走势：单序列随轮次变化 → 面积 + 折线。
+   * 单序列不需要图例（标题就点名了它画的是什么），末点直接标数值而不是每点都标。
+   * 议会协议里「未决归零是收敛信号」，所以这条线的走向就是"还要不要再开一轮"的依据。
+   */
+  function convergenceChart(trend) {
+    var W = 320, H = 76;
+    var L = 10, R = 54, T = 12, BASE = 50;   // 右侧留给末点标注，下方留给轮次刻度
+    var n = trend.length;
+    var max = 1;
+    trend.forEach(function (t) { if (t.open > max) max = t.open; });
+
+    var step = n > 1 ? (W - L - R) / (n - 1) : 0;
+    var pts = trend.map(function (t, i) {
+      return {
+        x: L + i * step,
+        y: BASE - (t.open / max) * (BASE - T),
+        t: t
+      };
+    });
+
+    var box = h("div", "chart-box");
+    box.appendChild(h("div", "chart-title", "未决 issue 逐轮"));
+
+    var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img" });
+    svg.setAttribute("aria-label",
+      "收敛走势：" + trend.map(function (t) { return "第 " + t.round + " 轮未决 " + t.open; }).join("，"));
+
+    // 基线：让"高度"有个可读的零点
+    svg.appendChild(sv("line", {
+      x1: L, y1: BASE, x2: W - R, y2: BASE,
+      stroke: "var(--line)", "stroke-width": "1"
+    }));
+
+    var d = pts.map(function (p, i) { return (i ? "L" : "M") + p.x + "," + p.y; }).join(" ");
+    svg.appendChild(sv("path", {
+      d: d + " L" + pts[n - 1].x + "," + BASE + " L" + pts[0].x + "," + BASE + " Z",
+      fill: "var(--c-pending)", opacity: "0.16", stroke: "none"
+    }));
+    svg.appendChild(sv("path", {
+      d: d, fill: "none", stroke: "var(--c-pending)",
+      "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round"
+    }));
+
+    // 末点：8px 标记 + 直接标数值（不是每个点都标）
+    var last = pts[n - 1];
+    svg.appendChild(sv("circle", {
+      cx: last.x, cy: last.y, r: "4",
+      fill: "var(--c-pending)", stroke: "var(--sunk)", "stroke-width": "2"
+    }));
+    var lbl = sv("text", {
+      x: last.x + 9, y: last.y + 4,
+      fill: "var(--ink)", "font-size": "12", "font-weight": "600",
+      "font-family": "JetBrains Mono, ui-monospace, monospace"
+    });
+    lbl.textContent = String(last.t.open);
+    svg.appendChild(lbl);
+
+    // 轮次刻度：文字用文本色，不穿序列色
+    trend.forEach(function (t, i) {
+      var tx = sv("text", {
+        x: pts[i].x, y: H - 8, "text-anchor": "middle",
+        fill: "var(--muted)", "font-size": "9.5",
+        "font-family": "JetBrains Mono, ui-monospace, monospace"
+      });
+      tx.textContent = "R" + t.round;
+      svg.appendChild(tx);
+      // 命中区比标记大，悬停能读到该轮的准数
+      var hit = sv("rect", {
+        x: pts[i].x - step / 2 || 0, y: 0,
+        width: Math.max(step, 20), height: BASE + 6, fill: "transparent"
+      });
+      var ttl = sv("title", {});
+      ttl.textContent = "第 " + t.round + " 轮：未决 " + t.open + "，累计提出 " + t.total + "，本轮新增 " + t.added;
+      hit.appendChild(ttl);
+      svg.appendChild(hit);
+    });
+
+    box.appendChild(svg);
+
+    var prev = n > 1 ? trend[n - 2] : null;
+    if (prev) {
+      var diff = last.t.open - prev.open;
+      var cls = diff > 0 ? "up" : (diff < 0 ? "down" : "flat");
+      var word = diff > 0 ? ("未决还在涨（+" + diff + "），这场在发散")
+        : (diff < 0 ? ("比上轮少 " + (-diff) + " 条，在收敛") : "与上轮持平");
+      box.appendChild(h("div", "verdict " + cls, word));
+    }
+    return box;
+  }
+
+  /** 状态构成：结掉的 / 待裁决 / 待验证。相邻段之间留 2px 缝，图例直接带数字 */
+  function statusStack(issues) {
+    var closed = 0, pending = 0, verify = 0;
+    issues.forEach(function (x) {
+      var k = str(x.statusKey);
+      if (k === "待裁决") pending++;
+      else if (k === "待验证") verify++;
+      else if (k && k !== "open") closed++;
+    });
+    var total = closed + pending + verify;
+    if (!total) return null;
+
+    var box = h("div");
+    var bar = h("div", "stack");
+    [["var(--c-closed)", closed], ["var(--c-pending)", pending], ["var(--c-verify)", verify]]
+      .forEach(function (p) {
+        if (!p[1]) return;
+        var seg = h("span");
+        seg.style.background = p[0];
+        seg.style.flex = p[1] + " 1 0";
+        bar.appendChild(seg);
+      });
+    box.appendChild(bar);
+
+    var lg = h("div", "stack-legend");
+    [["已结", "var(--c-closed)", closed], ["待裁决", "var(--c-pending)", pending], ["待验证", "var(--c-verify)", verify]]
+      .forEach(function (p) {
+        if (!p[2]) return;
+        var s = h("span");
+        var i = h("i");
+        i.style.background = p[1];
+        s.appendChild(i);
+        s.appendChild(document.createTextNode(p[0] + " "));
+        s.appendChild(h("b", null, String(p[2])));
+        lg.appendChild(s);
+      });
+    box.appendChild(lg);
+    return box;
+  }
+
+  function councilCard(d) {
+    var c = h("div", "card council-card" + (d.forOwner.length && !d.closed ? " accept" : ""));
+
+    var head = h("div", "head");
+    var left = h("div");
+    left.appendChild(h("div", "name", d.topic));
+    if (d.date) left.appendChild(h("div", "full mono", d.date));
+    head.appendChild(left);
+
+    var badges = h("div", "badges");
+    if (d.legacy) badges.appendChild(h("span", "badge b-pend", "旧格式"));
+    if (d.forOwner.length) badges.appendChild(h("span", "badge b-accept", "待裁决 " + d.forOwner.length));
+    badges.appendChild(h("span", "badge " + (d.closed ? "b-pend" : "b-run"), d.closed ? "已收" : (d.phase || "在议")));
+    head.appendChild(badges);
+    c.appendChild(head);
+
+    if (d.legacy) return c;   // 旧格式只登记会议本身，细节结构对不上，不硬解
+
+    var line = h("div", "metaline");
+    line.appendChild(h("span", null, "第 " + d.round + " 轮"));
+    if (d.draftVersion) line.appendChild(h("span", "vbadge", "草案 v" + d.draftVersion));
+    if (d.issueCount) {
+      var cnt = h("span");
+      cnt.appendChild(h("span", "count mono", String(d.issueCount)));
+      cnt.appendChild(document.createTextNode(" 条 issue"));
+      line.appendChild(cnt);
+    }
+    if (!d.statusKnown && d.issueCount) line.appendChild(h("span", null, "状态未解析"));
+    c.appendChild(line);
+
+    if (d.trend.length > 1) c.appendChild(convergenceChart(d.trend));
+
+    if (d.statusKnown && d.issueCount) {
+      var stack = statusStack(d.issues);
+      if (stack) c.appendChild(stack);
+    }
+
+    if (d.forOwner.length) {
+      var ph = h("div", "pend-head");
+      ph.appendChild(h("span", null, "等你裁决 " + d.forOwner.length + " 条"));
+      c.appendChild(ph);
+
+      var ul = h("ul", "owner-list");
+      d.forOwner.forEach(function (o) {
+        var li = document.createElement("li");
+        li.appendChild(document.createTextNode(str(o.title)));
+        if (o.question) li.appendChild(h("span", "q", str(o.question)));
+        ul.appendChild(li);
+      });
+      c.appendChild(ul);
+    }
+    return c;
+  }
+
+  // ── 任务卡 ──
+
+  function drawProgress(t) {
+    if (t.subs.length && t.subs.length <= 24) {
+      var box = h("div", "cells");
+      t.subs.forEach(function (s) { box.appendChild(h("div", "cell " + (s.status || "pending"))); });
+      return box;
+    }
+    var total = t.progress.total || t.subs.length;
+    if (!total) return null;
+    var bar = h("div", "bar");
+    var fill = h("span");
+    fill.style.width = Math.round((t.progress.done / total) * 100) + "%";
+    bar.appendChild(fill);
+    var wrapEl = h("div", "cells");
+    wrapEl.appendChild(bar);
+    return wrapEl;
+  }
+
+  function subItem(s) {
+    var li = h("li", "sub " + (s.status || "pending"));
+    li.appendChild(h("span", "mark " + (s.status || "pending"), MARK[s.status] || "□"));
+    var body = h("div", "sub-body");
+    body.appendChild(h("div", null, str(s.title)));
+    if (s.branch) {
+      body.appendChild(h("span", "branch mono", (s.repoAlias ? s.repoAlias + ":" : "") + s.branch));
+    }
+    li.appendChild(body);
+    return li;
+  }
+
+  function taskCard(t) {
+    var c = h("div", "card" + (t.accept ? " accept" : (t.stalled ? " stall" : "")));
+
+    var head = h("div", "head");
+    var left = h("div");
+    left.appendChild(h("div", "name", t.shortName));
+    if (t.title && t.title !== t.shortName) left.appendChild(h("div", "full", t.title));
+    head.appendChild(left);
+
+    var badges = h("div", "badges");
+    if (t.accept) badges.appendChild(h("span", "badge b-accept", "等你验收"));
+    else if (t.stalled) badges.appendChild(h("span", "badge b-stall", "停滞"));
+    badges.appendChild(h("span", "badge b-" + (t.status === "in_progress" ? "run" : "pend"),
+                         STATE_LABEL[t.status] || t.status));
+    head.appendChild(badges);
+    c.appendChild(head);
+
+    var prog = drawProgress(t);
+    if (prog) c.appendChild(prog);
+
+    var line = h("div", "metaline");
+    if (t.progress.total) {
+      var cnt = h("span");
+      cnt.appendChild(h("span", "count mono", t.progress.done + "/" + t.progress.total));
+      cnt.appendChild(document.createTextNode(" 子项"));
+      line.appendChild(cnt);
+    }
+    if (t.repos.length) line.appendChild(h("span", null, t.repos.join(" · ")));
+    if (t.lastActivity) line.appendChild(h("span", "mono", "最近 " + t.lastActivity));
+    c.appendChild(line);
+
+    // 未完成的摊开，完成的折起来——要盯的是剩下那些
+    var open = t.subs.filter(function (s) { return s.status !== "completed"; });
+    var done = t.subs.filter(function (s) { return s.status === "completed"; });
+
+    if (open.length) {
+      var ul = h("ul", "subs");
+      open.forEach(function (s) { ul.appendChild(subItem(s)); });
+      c.appendChild(ul);
+    }
+    if (done.length) {
+      var det = document.createElement("details");
+      det.appendChild(h("summary", null, "已完成 " + done.length + " 条"));
+      var ul2 = h("ul", "subs");
+      done.forEach(function (s) { ul2.appendChild(subItem(s)); });
+      det.appendChild(ul2);
+      c.appendChild(det);
+    }
+
+    if (t.iters.length) {
+      var box = h("div", "iters");
+      box.appendChild(h("div", "lbl", "迭代记录"));
+      var ul3 = h("ul");
+      t.iters.slice().reverse().forEach(function (l) { ul3.appendChild(h("li", null, l)); });
+      box.appendChild(ul3);
+      c.appendChild(box);
+    }
+    return c;
+  }
+
+  // ── 总装 ──
+
+  function draw() {
+    drawFresh();
+
+    var ds = filter ? crew.filter(function (d) { return d.project === filter; }) : crew.slice();
+    var ts = filter ? tasks.filter(function (t) { return t.repos.indexOf(filter) > -1; }) : tasks.slice();
+    // 议会不绑项目（议题可以是产品、训练、人生选择），项目筛选对它不适用
+    var cs = council.slice();
+
+    ds.sort(function (a, b) { return (crewWeight(b) - crewWeight(a)) || (a.order - b.order); });
+    ts.sort(function (a, b) { return (taskWeight(b) - taskWeight(a)) || (a.order - b.order); });
+    cs.sort(function (a, b) { return (councilWeight(b) - councilWeight(a)) || (a.order - b.order); });
+
+    drawOverview(ds, ts, cs);
+    drawFilters();
+
+    var ls = links.slice().sort(function (a, b) { return a.order - b.order; });
+    el.links.innerHTML = "";
+    ls.forEach(function (l) { el.links.appendChild(linkRow(l)); });
+    el.linkSec.hidden = ls.length === 0;
+
+    el.crew.innerHTML = "";
+    ds.forEach(function (d) { el.crew.appendChild(demandCard(d)); });
+    el.crewSec.hidden = ds.length === 0;
+
+    // 已收的会折起来——它们是档案，不是待办
+    var open = cs.filter(function (d) { return !d.closed; });
+    var shut = cs.filter(function (d) { return d.closed; });
+    el.council.innerHTML = "";
+    open.forEach(function (d) { el.council.appendChild(councilCard(d)); });
+    if (shut.length) {
+      var det = document.createElement("details");
+      det.appendChild(h("summary", null, "已收的会 " + shut.length + " 场"));
+      var box = h("div", "list");
+      box.style.marginTop = "10px";
+      shut.forEach(function (d) { box.appendChild(councilCard(d)); });
+      det.appendChild(box);
+      el.council.appendChild(det);
+    }
+    el.councilSec.hidden = cs.length === 0;
+
+    el.tasks.innerHTML = "";
+    ts.forEach(function (t) { el.tasks.appendChild(taskCard(t)); });
+    el.taskSec.hidden = ts.length === 0;
+
+    if (ds.length || ts.length || cs.length) {
+      el.notice.hidden = true;
+    } else if (loaded.tasks && loaded.crew && loaded.council) {
+      el.notice.hidden = false;
+      el.notice.textContent = filter ? "这个项目下没有在途需求或在册任务。" : "当前没有在途需求，账本里也没有活跃任务。";
+    }
+  }
+
+  // ── 接上共享数据库：订阅一次，别的会话写入后这里自动跟着变 ──
+  claude.use("db").then(function (db) {
+    if (!db) {
+      el.notice.textContent = "面板数据存在 Claude 的共享数据库里，需要在 claude.ai 上登录后打开。";
+      return;
+    }
+
+    function fail(err) {
+      el.notice.hidden = false;
+      el.notice.textContent = "读取失败（" + err.code + "），刷新页面后重试。";
+    }
+
+    db.collection("tasks").onSnapshot(function (snap) {
+      var raw = snap.docs.map(function (d) { return d.data(); });
+      checkContract("tasks", raw);
+      tasks = snap.docs.map(function (d) { return normTask(d.id, d.data()); });
+      loaded.tasks = true;
+      draw();
+    }, fail);
+
+    db.collection("crew").onSnapshot(function (snap) {
+      var rawC = snap.docs.map(function (d) { return d.data(); });
+      checkContract("crew", rawC);
+      crew = snap.docs.map(function (d) { return normDemand(d.id, d.data()); });
+      loaded.crew = true;
+      draw();
+    }, fail);
+
+    db.collection("links").onSnapshot(function (snap) {
+      links = snap.docs.map(function (d) {
+        var x = d.data() || {};
+        return {
+          project: str(x.project || d.id),
+          url: str(x.url),
+          openTasks: typeof x.openTasks === "number" ? x.openTasks : null,
+          order: typeof x.order === "number" ? x.order : 0
+        };
+      });
+      loaded.links = true;
+      draw();
+    }, fail);
+
+    db.collection("council").onSnapshot(function (snap) {
+      var rawL = snap.docs.map(function (d) { return d.data(); });
+      checkContract("council", rawL);
+      council = snap.docs.map(function (d) { return normCouncil(d.id, d.data()); });
+      loaded.council = true;
+      draw();
+    }, fail);
+  });
+
+  // 新鲜度是相对时间，自己走
+  setInterval(drawFresh, 60000);
+})();
+</script>

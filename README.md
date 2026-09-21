@@ -81,7 +81,7 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 | 工具 | 定位 | 与 AIConfig 的协同 |
 |---|---|---|
 | [**omc**](https://github.com/sschepis/oh-my-claudecode) (oh-my-claudecode) | Claude Code 多 Agent 编排层，协调专属 agent、HUD 状态栏、自治循环 | `tvs-hud` 与 omc HUD 合并输出到同一状态栏；`tvs-boss` 的 Leader 可借用 omc agent 类型调度 |
-| [**superpowers**](https://github.com/just-every/superpowers) | TDD 纪律、系统化调试、代码审查工作流 | 与 `tvs-code-reviewer`、`tvs-architect` 形成互补——superpowers 管过程纪律，tvs 管决策与记忆 |
+| [**superpowers**](https://github.com/just-every/superpowers) | TDD 纪律、系统化调试、代码审查工作流 | 与 `tvs-architect` 形成互补——superpowers 管过程纪律，tvs 管决策与记忆 |
 | [**codegraph**](https://github.com/nickvdyck/codegraph) | tree-sitter 解析的代码知识图谱，亚毫秒级符号/调用链查询 | `tvs-init-memory-system` 配置 codegraph 作为项目记忆的结构层；`tvs-architect` 和 `tvs-analyze` 优先走 codegraph 做代码理解 |
 
 > 三者均为可选增强，缺失时 AIConfig 所有功能正常降级运行。
@@ -124,13 +124,13 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 ---
 
-**`tvs-clean-code`** — 让代码说人话
+**`tvs-clean-code`** — 让代码说人话　`【已废弃】改用内置 /simplify`
 
 > 能跑的代码和好读的代码之间，往往差的不是功能，而是命名、结构和一句关键注释。`tvs-clean-code` 系统性清理函数命名、消除冗余逻辑、补上让下一个读代码的人不骂娘的中文注释。重构前跑一遍，技术债少一半。
 
 ---
 
-**`tvs-code-reviewer`** — 挑剔的代码审查员，不讲情面
+**`tvs-code-reviewer`** — 挑剔的代码审查员，不讲情面　`【已废弃】改用内置 /code-review`
 
 > 不是"看起来没问题"，而是**证据驱动地找问题**。`tvs-code-reviewer` 按固定通道逐轮扫描：安全漏洞 → 逻辑缺陷 → SOLID 原则 → 性能隐患 → 代码坏味道，每条问题都标明严重等级和位置。PR 合并前过一遍，比队友 review 更稳、更快、更狠。
 
@@ -176,7 +176,7 @@ AIConfig 专注差异化能力（任务账本、多项目团队、架构访谈�
 
 ---
 
-**`tvs-pullread`** — 真正读懂别人的 PR
+**`tvs-pullread`** — 真正读懂别人的 PR　`【已废弃】无直接替代`
 
 > "看一下这个 PR 改了什么"——大多数时候 AI 只会读你贴过来的 diff，看不到上下文。`tvs-pullread` 直接拉取远程分支，通读真实代码变更，理解业务意图、分析潜在影响，给你一份有判断的阅读报告，不是 diff 的复读机。
 
