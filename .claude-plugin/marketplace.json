@@ -1,19 +1,19 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "tvs-inksnow",
-  "description": "inksnow 个人 AI 助手配置库：项目分析、架构顾问、需求访谈、议会商讨、代码审查、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 路由、skill 文档审计等 19 个 skill",
+  "description": "inksnow 个人 AI 助手配置库：项目分析、架构顾问、需求访谈、议会商讨、指挥台面板、多项目团队、状态栏 HUD、任务账本、记忆工程、领域知识引擎、skill 路由、skill 文档审计等 16 个在用 skill（另 3 个已废弃保留）",
   "owner": { "name": "inksnowhailong" },
   "plugins": [
     {
       "name": "tvs-inksnow",
-      "description": "一套工具中性的 skill 库：项目分析、架构顾问、需求访谈、代码审查、多项目团队、状态栏 HUD、任务账本、记忆系统等。",
-      "version": "0.11.0",
+      "description": "一套工具中性的 skill 库：项目分析、架构顾问、需求访谈、议会商讨、指挥台面板、多项目团队、状态栏 HUD、任务账本、记忆系统等。",
+      "version": "0.15.0",
       "author": { "name": "inksnowhailong" },
       "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/inksnowhailong/ai-tools-skills",
-      "tags": ["skills", "tasks", "architecture", "code-review", "memory"]
+      "tags": ["skills", "tasks", "architecture", "council", "panel", "memory"]
     }
   ],
-  "version": "0.11.0"
+  "version": "0.15.0"
 }
