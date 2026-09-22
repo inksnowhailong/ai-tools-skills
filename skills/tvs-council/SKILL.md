@@ -149,21 +149,27 @@ v1 全文呈现给发起人，写 `草案-v1.md`。不停下，直接进第 5 �
 
 按 protocol.md 的纪要模板输出到对话并写入目录。纪要 = 最终草案全文 + 决策记录（每条 issue 的最终处置、理由、反驳、暂定 / 概括拍板状态）。发起人明确要求写进当前仓库时，只写纪要一份，路径由发起人指定。
 
-## 面板（可选，装了 tvs-task 才有）
+## 面板
 
 指挥台面板有一块「议会」区。它解决的是这个：**收敛走势在对话里看不出来**——未决 issue 是在降还是在涨，只能一轮轮往回翻；而"未决归零是收敛信号"正是判断该不该再来一轮的依据。
 
+**同步不是可选项**，唯一不做的情形是宿主调不出 `Artifact` / `ArtifactData`（非 Claude Code 宿主，或工具被关）——那时略过本节，议会其余流程照跑。
+
 ```bash
-node "{SKILL_DIR}/scripts/panel-data.mjs"                   # 扫全部会议，按当前目录定范围
+node "{SKILL_DIR}/scripts/panel-data.mjs" --scope <范围键>    # 范围键只从 tvs-panel 的 panel.mjs 拿
 node "{SKILL_DIR}/scripts/panel-data.mjs" --dir <会议目录名>  # 只出这一场
 node "{SKILL_DIR}/scripts/panel-data.mjs" --known a,b        # 告知库里现存文档 id，拿应删差集
+# 本脚本不算范围键、不读地址簿、不输出 url —— 地址与页面全部走 tvs-panel
 ```
 
 脚本从落盘文件里自己算出轮次、草案版本、issue 原文与状态、**逐轮收敛走势**、待裁决条目——都在文件里，不用主持人喂。主持人只补一个 `phase`（当前停在协议哪一步）。
 
 **同步时机**：第 7 步停下时，呈现之后、`AskUserQuestion` 之前跑一次 `--dir <本场>`。那一刻处置表刚核对完，数据最准。
 
-**写库**：`ArtifactData` 的 `batch`，`collection:"council"`，**`doc_id` 用输出里的 `docId` 不是 `dir`**——库只收 ASCII，议题短名是中文。已存在的文档要带 `if_version`。面板地址读 `~/.tvs-panel.json`；该范围没有板时 `url` 为空，让 `tvs-panel` 先发布页面（本 skill 不持有页面）。
+**拿地址**：跑 `<tvs-panel>/scripts/panel.mjs --list` 拿全部板——议会不分范围，**每块板都要写**（见下）。
+一块板都没有时：**自动建，不必问**。用 `Artifact` 发布 `<tvs-panel>/page.html`（带 `capabilities: {"db":{}}` 与 `icon: "checklist"`），范围取当前目录，拿到地址后 `panel.mjs --cwd <当前目录> --set <URL>` 记下。
+
+**写库**：`ArtifactData` 的 `batch`，`collection:"council"`，**`doc_id` 用输出里的 `docId` 不是 `dir`**——库只收 ASCII，议题短名是中文。已存在的文档要带 `if_version`。
 
 **不改变议会本身**：面板只读落盘文件，主持人的呈现、AskUserQuestion 停下、红线一条都不变。面板是投影，不是替代——发起人的裁决仍然只在对话里给。
 

@@ -209,10 +209,11 @@ boss 不会实时盯着你。活儿一多、回执一多，他通常等所有线
 
 **一个团队根一块板。** 地址簿 `~/.tvs-panel.json` 按范围键索引，你的键就是团队根；tvs-task 在团队根跑时算出同一个键，于是**总指挥台**上「在途需求」与「全部项目的任务」并排。各项目自己那块板是另一个 artifact，与你无关——分板是物理隔离，别的团队根写在另一个 db 里，你既删不着也看不见。
 
-**你不持有页面文件**（页面归 `tvs-panel`），只写 `crew` 集合；该范围还没有板时 `url` 为空，让 `tvs-panel` 先发布。
+**你不持有页面文件**（页面归 `tvs-panel`），只写 `crew` 与 `links` 两个集合。**地址从 `tvs-panel` 拿，不要问本脚本要**：
 
 ```bash
-node "$SKILL/scripts/panel-data.mjs" --root "<团队根>"          # 输出 JSON：url + docs + stale
+node "<tvs-panel>/scripts/panel.mjs" --cwd "<团队根>"           # 拿 scope 与 url —— 范围键与地址簿只有这一处实现
+node "$SKILL/scripts/panel-data.mjs" --root "<团队根>"          # 输出 JSON：docs + links + stale（没有 url）
 node "$SKILL/scripts/panel-data.mjs" --root "<团队根>" --known a,b  # 带上库里现存 slug，拿应删差集
 ```
 
@@ -234,7 +235,7 @@ node "$SKILL/scripts/panel-data.mjs" --root "<团队根>" --known a,b  # 带上�
 
 **待拍板项的三种状态**，脚本已分好，你不用管：标题打了删除线（`~~标题~~`）的算**已处理**（协议说拍板后删除该项，实际习惯是划线保留记录，两种写法面板都认）；`不决卡住` 写的不是「不卡 / 可延后 / 不急」的算**急件**，面板上摊开；其余折叠。徽章上的数字是未处理数，不含已处理的。
 
-**面板没初始化时**（`url` 为空）：说明这台机器还没开过面板。跑一次 `tvs-task`（它持有页面并负责发布），或告诉 boss 一句，别自己造第二块板。
+**面板没初始化时**（`panel.mjs --cwd "<团队根>"` 返回的 `url` 为空）：**自动建，不必问**。用 `Artifact` 发布 `<tvs-panel>/page.html`（带 `capabilities: {"db":{}}` 与 `icon: "checklist"`），拿到地址后 `panel.mjs --cwd "<团队根>" --set <URL>` 记下。**范围键必须是团队根**——用别的目录建会多出一块孤儿板，而你写的 `crew` 从此落在 boss 打不开的地方。唯一不建的情形是宿主调不出 `Artifact` / `ArtifactData`，那时略过面板，进度卡照发。
 
 面板不违背「记忆有界」：它不落进 `.tvs-boss/`，数据可随时由 `work/` 与 git 现状重推，和原生 Task 一样是**投影不是账本**。
 
