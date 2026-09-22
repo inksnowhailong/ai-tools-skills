@@ -22,6 +22,10 @@ tvs-boss 调用
 主实例不用 Write / Edit 碰任何 `.html`，只做两件事：接住用户的话（对话里说的、面板上评论的），
 把它变成派工单发下去。
 
+> **发布一份现成的 `page.html` 不在此列**，直接发就行。`Artifact` 工具收的是 `file_path`，
+> 文件内容不经过你的上下文——标准面板首次建板就是这种，派个子 agent 反而白花一次 spawn。
+> 分界是**这一步要不要写 HTML**：要写（会话面板的定制页、改 `page.html` 的内容）才派。
+
 ```
 Agent({ subagent_type: "general-purpose", model: "sonnet", prompt: "<派工单>" })
 ```

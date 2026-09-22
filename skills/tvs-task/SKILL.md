@@ -1,6 +1,6 @@
 ---
 name: tvs-task
-description: 当用户显式提到任务账本时使用：说"记任务/建任务 xxx"、"看任务/任务表/进度怎样"、"xxx 验收了/确认完成/归档"、"继续搞 xxx（某在册任务）"、"上周做了啥"，或 SessionStart 注入的「tvs-task 在册任务」摘要出现在上下文时。作用：跨会话持久任务账本（~/.tasklog）——两层结构（任务→子项），状态与 Claude Code 内置 Task 同构（pending/in_progress/completed），进度/待验收/停滞从 git 现推；会话内通过播种协议接入内置 Task UI 实时展示，会话结束 hook 自动回收。禁止从日常对话语义里猜任务——账本写入只走显式指令。
+description: 当用户显式提到任务账本时使用：说"记任务/建任务 xxx"、"看任务/任务表/进度怎样"、"xxx 验收了/确认完成/归档"、"继续搞 xxx（某在册任务）"、"上周做了啥"，或 SessionStart 注入的「tvs-task 在册任务」摘要出现在上下文时。作用：跨会话持久任务账本（~/.tasklog）——两层结构（任务→子项），状态与 Claude Code 内置 Task 同构（pending/in_progress/completed），进度/待验收/停滞从 git 现推；会话内通过播种协议接入内置 Task UI 实时展示，会话结束 hook 自动回收。看任务默认开 Artifact 面板（没板自动建，宿主没有面板能力才退回字符画）。禁止从日常对话语义里猜任务——账本写入只走显式指令。
 ---
 
 # 任务账本（tvs-task v2）
@@ -61,16 +61,29 @@ _下个ID：T-044_
 - 用户说"给 xxx 加个子项 yyy" → 定位任务追加行。
 - hook 注入的新分支候选被用户认领 → 挂为指定任务的新子项（绑该分支）；用户拒绝 → 把 `仓库路径<TAB>分支名` 追加进 ignore.txt。
 
-### 看任务 + 播种（`/tvs-task` 无参的固定动作，三步连跑）
+### 看任务（`/tvs-task` 无参的固定动作）
+
+**默认开面板，聊天里不贴树视图。** 三步连跑，都不是可选项：
+
 ```bash
 node "{SKILL_DIR}/scripts/scan.mjs" --apply      # ① git 事实落地（子项合并标记）
-node "{SKILL_DIR}/scripts/render.mjs"            # ② 全量树视图（含派生标注），原样贴进回复
-node "{SKILL_DIR}/scripts/render.mjs" --seed     # ③ 播种计划：按 cwd 命中列出父/子行 subject + 锚 + 状态，照单 TaskCreate（见播种协议）
-node "{SKILL_DIR}/scripts/render.mjs" --archive  # 附最近归档（用户问归档时）
-node "{SKILL_DIR}/scripts/open-panel.mjs"        # 旧 TUI 面板（离线兜底）；默认面板见下面「面板（Artifact）」
+node "{SKILL_DIR}/scripts/render.mjs" --seed     # ② 播种计划：按 cwd 命中列出父/子行 subject + 锚 + 状态，照单 TaskCreate（见播种协议）
+#                                                  ③ 面板同步：走下面「面板（Artifact）」那节，没板就自动建
 ```
-**第③步不是可选项**：`/tvs-task` 一执行就播种，播完在回复末尾加一行"已播种 N 个任务到内置 Task"。命中规则由脚本定（任务 repo 与 cwd 互为前缀；无 repo 的任务只在 cwd 不是 git 仓库时命中）——在项目里跑只播该项目的，在多 repo 父目录（如 tvs-boss 团队根）跑就全播。
-`open-panel.mjs` 是旧的交互 TUI（r 刷新 / s 扫描报告 / q 退出），必须有独立 TTY——不要在会话内直接跑 panel.mjs。装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
+
+回复形状固定：**面板地址一行 + "已播种 N 个任务到内置 Task"一行**，不复述任务内容——面板就是拿来看的，再贴一遍树视图是同一份东西占两个地方。
+
+播种命中规则由脚本定（任务 repo 与 cwd 互为前缀；无 repo 的任务只在 cwd 不是 git 仓库时命中）——在项目里跑只播该项目的，在多 repo 父目录（如 tvs-boss 团队根）跑就全播。**面板的命中规则与它逐字一致**：播种看到什么，面板就有什么。
+
+**降级到字符画的唯一条件：这个宿主没有面板能力。** 也就是 `Artifact` / `ArtifactData` 调不出来——非 Claude Code 的宿主，或工具被关掉。那时改跑 `render.mjs`（无 `--seed`）把全量树视图原样贴进回复，其余步骤不变。**能开面板就不要贴树视图。**
+
+```bash
+node "{SKILL_DIR}/scripts/render.mjs"            # 全量树视图（含派生标注）——仅降级时用
+node "{SKILL_DIR}/scripts/render.mjs" --archive  # 附最近归档（用户问归档时）
+node "{SKILL_DIR}/scripts/open-panel.mjs"        # 旧 TUI，需独立 TTY，不要在会话内直接跑
+```
+
+`open-panel.mjs` 是旧的交互 TUI（r 刷新 / s 扫描报告 / q 退出），装过 `tasks` 命令的用户可自己敲 `! tasks`（见环境前置）。脚本坏了按账本格式手动渲染兜底（同样不显示 ID）。
 
 ## 面板（Artifact）
 
@@ -86,22 +99,23 @@ node "{SKILL_DIR}/scripts/open-panel.mjs"        # 旧 TUI 面板（离线兜底
 分板是**物理隔离**：各板各有一个 db，不同实例之间删不着对方、watch 也不串、看不见彼此的噪音。地址簿 `~/.tvs-panel.json` 按范围键索引（中立位置，tvs-boss 的需求区按团队根取同一块板）。
 
 ```bash
-node "{SKILL_DIR}/scripts/panel-data.mjs"                       # 按当前目录定范围
-node "{SKILL_DIR}/scripts/panel-data.mjs" --cwd <路径>           # 指定范围
+node "{SKILL_DIR}/scripts/panel-data.mjs" --scope <范围键>       # 范围键只从 tvs-panel 的 panel.mjs 拿
 node "{SKILL_DIR}/scripts/panel-data.mjs" --no-git              # 跳过 git 派生（快速路径）
 node "{SKILL_DIR}/scripts/panel-data.mjs" --known T-1,T-2       # 告知该板现存 id，拿应删差集
-# 页面发布、地址簿、逐块重发 —— 全部走 tvs-panel，这里只产数据
+# 本脚本不算范围键、不读地址簿、不输出 url —— 页面发布、地址簿、逐块重发全部走 tvs-panel
 ```
 
-### 同步（用户说"开面板 / 看板子 / 同步面板"时）
+### 同步（`/tvs-task` 每次都跑；账本一变也跑）
 
-1. 跑 `panel-data.mjs`（默认按当前目录定范围），把 `docs` 逐个落盘成 JSON 文件，拿到 `scope` 与 `url`。
-2. **`url` 为空** → 这个范围还没有板：交给 `tvs-panel` 发布页面并记地址（本 skill 不持有页面）。
-   **`url` 非空** → **不要重发页面**，直接进第 3 步。
-3. `ArtifactData` 的 `list` 读该板 `tasks` 集合现有 id，回带 `--known` 重跑脚本拿 `stale`。
-4. `ArtifactData` 的 `batch` 一次写完：每个文档一条 `set`（`collection:"tasks"`、`doc_id` 取文档的 `id` 字段、用 `file_path` 指向落盘的 JSON），`stale` 里每个 id 一条 `delete`。
-   **已存在的文档必须带 `if_version`**（值取第 3 步 `list` 返回的 version），否则整批被乐观锁拒绝、**一个字都不写**。被拒了就重新 `list` 拿新 version 再发一次。
-5. 回复里只给地址，**不复述面板内容**——面板本身就是给人看的。
+1. 跑 `<tvs-panel>/scripts/panel.mjs --cwd <当前目录>` 拿 `scope` 与 `url`。**范围键与地址簿只有那一处实现**，本 skill 的脚本不算键也不读地址簿。
+2. 跑 `panel-data.mjs --scope <上一步的 scope>`，把 `docs` 逐个落盘成 JSON 文件。
+   **`taskCount` 为 0 → 到此为止**：回一句"当前目录不属于任何在册任务的项目"，不建板也不同步。给空范围建板纯属浪费，而退回去同步全量等于把别的项目的噪音塞进这块板。
+3. **`url` 为空** → 这个范围还没板：**自动建，不必问**。用 `Artifact` 发布 `<tvs-panel>/page.html`，带 `capabilities: {"db":{}}` 与 `icon: "checklist"`，拿到地址后 `panel.mjs --cwd <同一范围> --set <URL>` 记下。
+   **`url` 非空** → **不要重发页面**，直接进第 4 步。
+4. `ArtifactData` 的 `list` 读该板 `tasks` 集合现有 id，回带 `--known` 重跑脚本拿 `stale`。
+5. `ArtifactData` 的 `batch` 一次写完：每个文档一条 `set`（`collection:"tasks"`、`doc_id` 取文档的 `id` 字段、用 `file_path` 指向落盘的 JSON），`stale` 里每个 id 一条 `delete`。
+   **已存在的文档必须带 `if_version`**（值取第 4 步 `list` 返回的 version），否则整批被乐观锁拒绝、**一个字都不写**。被拒了就重新 `list` 拿新 version 再发一次。
+6. 回复里只给地址，**不复述面板内容**——面板本身就是给人看的。
 
 **`taskCount` 远小于 `totalTasks` 是正常的**，说明这个范围过滤掉了别的项目。命中 0 个就说一句"当前目录不属于任何在册任务的项目"，不要退回去同步全量——那等于把别的项目的噪音塞进这块板。
 
